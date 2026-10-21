@@ -1126,7 +1126,7 @@ async function poll(){
     if(!r.ok) throw new Error('HTTP '+r.status);
     const data=await r.json();
     keyform.hidden=true; fails=0;
-    if(!connected){ connected=true; setConn(data.backend==='redis'?'terhubung':'lokal',true); }
+    if(!connected){ connected=true; if(data.backend==='memory'){ setConn('tanpa penyimpanan',false); log('Peringatan: server tidak punya penyimpanan. Sambungkan Upstash Redis di Vercel supaya hari dan riwayat tugas tidak hilang.'); } else setConn(data.backend==='redis'?'terhubung':'lokal',true); }
     applyOffice(data.office);
     if(data.changed!==false){
       since=data.version;
