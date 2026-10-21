@@ -45,7 +45,7 @@ const server = http.createServer(async (req, res) => {
 
 const port = Number(process.env.PORT || 3000);
 server.listen(port, () => {
-  const backend = (process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL) ? 'Upstash Redis' : 'memori (hilang saat server dimatikan)';
+  const backend = (process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL) ? 'Upstash Redis' : 'file data/kantor-ai.json (tetap ada walau server dimatikan)';
   console.log(`Kantor AI berjalan di http://localhost:${port}`);
   console.log(`Penyimpanan: ${backend}`);
   if (!process.env.OFFICE_WRITE_KEY) console.log('Peringatan: OFFICE_WRITE_KEY belum diatur, hook tidak akan bisa mengirim tugas. Salin .env.example ke .env.');

@@ -1,11 +1,13 @@
 # Kantor AI
 
-Kantor 3D berisi **Manager** dan **Raihan (IT Analyst)**. Setiap kali Anda mengirim prompt di **Claude Code**, Manager menerima tugasnya dan mengantarnya ke meja Raihan. Saat Claude selesai menjawab, ringkasan jawabannya muncul di monitor Raihan, lalu Manager datang untuk mereview.
+Kantor 3D di lantai 38 sebuah gedung, berisi **Manager** dan **Raihan (IT Analyst)**. Setiap kali Anda mengirim prompt di **Claude Code**, Manager menerima tugasnya dan mengantarnya ke meja Raihan. Saat Claude selesai menjawab, ringkasan jawabannya muncul di monitor Raihan, lalu Manager datang untuk mereview.
 
 ```
 Prompt di Claude Code ──(hook UserPromptSubmit)──▶ /api/event ──▶ Redis ◀── /api/state ◀── halaman kantor (cek tiap 4 detik)
 Claude selesai menjawab ─(hook Stop)─────────────▶ /api/event
 ```
+
+Langit di luar mengikuti jam di komputer yang membuka halaman: pagi, siang, sore, dan malam. Saat malam, jendela gedung di sekitar menyala dan lampu kantor hidup.
 
 Hook dipasang di level user (`~/.claude/settings.json`), jadi aktif di **semua proyek dan semua sesi Claude Code** di komputer itu. Chat di claude.ai tidak memicu hook ini.
 
@@ -44,7 +46,7 @@ npm run test-event
 
 Mulai ulang Claude Code, lalu kirim prompt apa saja. Manager langsung bergerak.
 
-Mode lokal memakai memori, jadi riwayat tugas hilang saat server dimatikan.
+Mode lokal menyimpan data di `data/kantor-ai.json`, jadi riwayat tugas, hitungan hari, dan jumlah tugas selesai tetap ada walau server dimatikan. Hapus file itu untuk memulai kantor dari Hari ke-1 lagi.
 
 ## 2. Upload ke Vercel
 
@@ -67,6 +69,14 @@ npm run test-event
 Menjalankan installer lagi akan mengganti pemasangan lama, jadi tidak ada hook dobel. Isi `settings.json` lain tetap utuh, dan cadangannya disimpan sebagai `settings.json.bak-kantor-ai`.
 
 Untuk membuat kunci acak: `node -e "console.log(crypto.randomUUID())"`
+
+## Progres yang tersimpan
+
+- **Hari ke-N** dihitung dari tanggal kantor pertama kali menerima tugas atau dibuka, dan terus bertambah setiap hari.
+- **Tugas hari ini** dan **total tugas selesai** disimpan di server, jadi tetap sama di semua perangkat.
+- **30 tugas terakhir** beserta hasilnya tersimpan dan langsung tampil saat halaman dibuka.
+- Di Vercel semua ini disimpan di Upstash Redis. Di mode lokal disimpan di `data/kantor-ai.json`.
+- Batas "hari ini" memakai zona waktu WIB. Untuk zona lain, atur `OFFICE_TZ_OFFSET_MINUTES` (contoh WITA: `480`, WIT: `540`).
 
 ## Privasi
 
