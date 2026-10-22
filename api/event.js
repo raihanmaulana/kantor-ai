@@ -1,20 +1,9 @@
-// POST /api/event — dipanggil oleh hook Claude Code. Butuh OFFICE_WRITE_KEY.
-import { recordEvent } from '../lib/office.js';
-import { keyFrom, matches } from '../lib/auth.js';
+// POST /api/event — dari hook Claude Code (opsional). Aktif hanya bila CLAUDE_HOOK_ENABLED=1.
+//   { type: 'prompt', session_id, project, prompt }  → task Open di project "Claude Code" (satu task per sesi)
+//   { type: 'stop',   session_id, result }           → task pindah ke Review, menunggu persetujuan Anda
+import { recordHookEvent } from '../lib/board.js';
+import { writeHandler, body } from '../lib/http.js';
 
-export default async function handler(req, res) {
-  if (req.method !== 'POST') return res.status(405).json({ error: 'Gunakan POST.' });
-  const writeKey = process.env.OFFICE_WRITE_KEY;
-  if (!writeKey) return res.status(500).json({ error: 'OFFICE_WRITE_KEY belum diatur di environment variables.' });
-  if (!matches(keyFrom(req), writeKey)) return res.status(401).json({ error: 'Kunci tulis salah.' });
-
-  let body = req.body;
-  if (typeof body === 'string') {
-    try { body = JSON.parse(body); } catch { body = {}; }
-  }
-  try {
-    res.status(200).json(await recordEvent(body || {}));
-  } catch (err) {
-    res.status(500).json({ error: 'Gagal menyimpan: ' + (err && err.message ? err.message : err) });
-  }
-}
+export default writeHandler({
+  POST: (req) => recordHookEvent(body(req)),
+});

@@ -1,9 +1,9 @@
 // Server lokal: menyajikan public/ dan menjalankan api/*.js seperti di Vercel.
 // Jalankan: npm run local   lalu buka http://localhost:3000
 import http from 'node:http';
-import { readFileSync, existsSync } from 'node:fs';
-import { join, dirname, extname, normalize } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { readFileSync, existsSync, readdirSync, statSync } from 'node:fs';
+import { join, dirname, extname, normalize, basename } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const here = dirname(fileURLToPath(import.meta.url));
 
@@ -16,11 +16,13 @@ if (existsSync(envFile)) {
   }
 }
 
-const routes = {
-  '/api/event': (await import('./api/event.js')).default,
-  '/api/state': (await import('./api/state.js')).default,
-};
-const types = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.svg': 'image/svg+xml', '.png': 'image/png' };
+// Setiap file api/<nama>.js menjadi rute /api/<nama>, sama seperti Vercel.
+const routes = {};
+for (const f of readdirSync(join(here, 'api'))) {
+  if (f.endsWith('.js')) routes['/api/' + basename(f, '.js')] = (await import(pathToFileURL(join(here, 'api', f)).href)).default;
+}
+const types = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css', '.json': 'application/json', '.svg': 'image/svg+xml', '.png': 'image/png' };
+const publicDir = join(here, 'public');
 
 const server = http.createServer(async (req, res) => {
   const u = new URL(req.url, 'http://localhost');
@@ -33,20 +35,22 @@ const server = http.createServer(async (req, res) => {
     for await (const chunk of req) raw += chunk;
     req.query = Object.fromEntries(u.searchParams);
     try { req.body = raw ? JSON.parse(raw) : {}; } catch { req.body = raw; }
-    return handler(req, res);
+    try { return await handler(req, res); }
+    catch (err) { console.error(err); if (!res.headersSent) res.status(500).json({ error: String(err.message || err) }); return; }
   }
 
-  const rel = u.pathname === '/' ? 'index.html' : normalize(u.pathname).replace(/^([/\\])+/, '');
-  const file = join(here, 'public', rel);
-  if (!file.startsWith(join(here, 'public')) || !existsSync(file)) { res.statusCode = 404; return res.end('Tidak ditemukan'); }
+  const rel = u.pathname === '/' ? 'index.html' : normalize(decodeURIComponent(u.pathname)).replace(/^([/\\])+/, '');
+  const file = join(publicDir, rel);
+  if (!file.startsWith(publicDir) || !existsSync(file) || !statSync(file).isFile()) { res.statusCode = 404; return res.end('Tidak ditemukan'); }
   res.setHeader('content-type', types[extname(file)] || 'application/octet-stream');
+  res.setHeader('cache-control', 'no-store');
   res.end(readFileSync(file));
 });
 
 const port = Number(process.env.PORT || 3000);
-server.listen(port, () => {
-  const backend = (process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL) ? 'Upstash Redis' : 'file data/kantor-ai.json (tetap ada walau server dimatikan)';
+server.listen(port, async () => {
+  const { backend } = await import('./lib/store.js');
   console.log(`Kantor AI berjalan di http://localhost:${port}`);
-  console.log(`Penyimpanan: ${backend}`);
-  if (!process.env.OFFICE_WRITE_KEY) console.log('Peringatan: OFFICE_WRITE_KEY belum diatur, hook tidak akan bisa mengirim tugas. Salin .env.example ke .env.');
+  console.log('Penyimpanan: ' + (backend === 'redis' ? 'Upstash Redis' : backend === 'file' ? 'file data/kantor-ai.json (tetap ada walau server dimatikan)' : 'memori'));
+  if (!process.env.OFFICE_WRITE_KEY) console.log('Peringatan: OFFICE_WRITE_KEY belum diatur, dashboard tidak bisa menyimpan perubahan. Salin .env.example ke .env.');
 });
