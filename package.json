@@ -2,7 +2,7 @@
   "name": "kantor-ai",
   "version": "1.0.0",
   "private": true,
-  "description": "Kantor 3D: Manager dan IT Analyst bekerja setiap kali Anda memberi prompt di Claude Code.",
+  "description": "Dashboard task dan kantor 3D yang hidup: karyawan bergerak sesuai status task.",
   "type": "module",
   "engines": {
     "node": ">=18"

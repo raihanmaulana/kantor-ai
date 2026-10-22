@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-// Memasang hook Kantor AI ke Claude Code untuk SEMUA proyek (file ~/.claude/settings.json).
+// Memasang hook Kantor AI (opsional) ke Claude Code untuk SEMUA proyek (file ~/.claude/settings.json).
+// Server baru membuat task dari hook bila CLAUDE_HOOK_ENABLED=1.
 //
 //   node install-hooks.mjs --url https://nama-anda.vercel.app --key KUNCI_TULIS
 //   node install-hooks.mjs --url http://localhost:3000 --key KUNCI_TULIS     (mode lokal)
@@ -69,4 +70,5 @@ console.log('Hook Kantor AI terpasang.');
 console.log('  Skrip   : ' + scriptPath);
 console.log('  Config  : ' + configPath + (has('no-text') ? '  (isi prompt tidak dikirim)' : ''));
 console.log('  Settings: ' + settingsPath + (existsSync(settingsPath + '.bak-kantor-ai') ? '  (cadangan: settings.json.bak-kantor-ai)' : ''));
+console.log('Pastikan server mengizinkan hook: CLAUDE_HOOK_ENABLED=1 di .env atau environment variables Vercel.');
 console.log('Mulai ulang Claude Code, lalu coba: npm run test-event');

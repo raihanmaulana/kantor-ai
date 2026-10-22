@@ -1,32 +1,51 @@
 # Kantor AI
 
-Kantor 3D di lantai 38 sebuah gedung, berisi **Manager** dan **Raihan (IT Analyst)**. Setiap kali Anda mengirim prompt di **Claude Code**, Manager menerima tugasnya dan mengantarnya ke meja Raihan. Saat Claude selesai menjawab, ringkasan jawabannya muncul di monitor Raihan, lalu Manager datang untuk mereview.
+Dashboard task dan kantor 3D yang hidup, di lantai 38 sebuah gedung. Anda mengelola pekerjaan kantor dan project pribadi di papan Kanban. Kelima karyawan bergerak sesuai status task, dan saat tidak sedang bekerja mereka punya aktivitas sendiri.
+
+| Karyawan | Peran | Yang dilakukan di kantor |
+|---|---|---|
+| Raihan | Manager | Menerima presentasi task yang selesai di ruang meeting dan menyetujuinya |
+| Kartika | Project Coordinator | Menulis setiap task baru ke papan task |
+| Irham, Fariz | Engineer | Mengerjakan task, dibagi rata berdasarkan beban kerja |
+| Nadia | Designer | Otomatis mengambil task berlabel desain |
+
+Nama, peran, warna baju, dan jam kerja diatur di satu file: `lib/team.js`.
+
+## Alur kerja
 
 ```
-Prompt di Claude Code ──(hook UserPromptSubmit)──▶ /api/event ──▶ Redis ◀── /api/state ◀── halaman kantor (cek tiap 4 detik)
-Claude selesai menjawab ─(hook Stop)─────────────▶ /api/event
+Task baru (Open) ──▶ Kartika berjalan ke papan, menulis, kartu muncul di papan 3D
+On Progress      ──▶ penanggung jawab mengambil kartu, kembali ke meja, mengetik (monitor menampilkan judul task)
+Done             ──▶ penanggung jawab membawa laptop ke ruang meeting, Raihan ikut masuk,
+                     presentasi ±7 detik, lalu confetti dan task resmi selesai
 ```
 
-Langit di luar mengikuti jam di komputer yang membuka halaman: pagi, siang, sore, dan malam. Saat malam, jendela gedung di sekitar menyala dan lampu kantor hidup.
-
-Hook dipasang di level user (`~/.claude/settings.json`), jadi aktif di **semua proyek dan semua sesi Claude Code** di komputer itu. Chat di claude.ai tidak memicu hook ini.
+- Task yang ditarik ke Done tampil dulu dengan badge **Presenting to Manager**. Server yang memutuskan kapan task selesai, jadi urutannya sama di semua perangkat.
+- Kalau banyak perubahan datang bersamaan, setiap karyawan punya antrean aksi sendiri, sehingga animasinya tidak bertabrakan. Dashboard tetap langsung terupdate.
+- Saat tidak memegang task, karyawan ngopi (antre di mesin kopi), santai di sofa, ngobrol berdua di dekat jendela, melihat pemandangan kota, main ping-pong, peregangan, atau rapat singkat di papan. Raihan sesekali berkeliling.
+- Jam kerja 08.00–17.00. Setelahnya, yang tidak memegang task pulang lewat lift, sementara yang masih memegang task lembur. Pagi hari mereka datang dari lift. Task baru di malam hari memanggil orangnya kembali.
+- Langit, matahari, dan lampu kota mengikuti jam di perangkat yang membuka halaman.
 
 ## Isi folder
 
 | File | Fungsi |
 |---|---|
-| `public/index.html` | Halaman kantor 3D |
-| `api/event.js` | Menerima event dari hook (butuh kunci tulis) |
-| `api/state.js` | Dibaca halaman kantor (butuh kunci baca bila diatur) |
-| `lib/` | Penyimpanan (Upstash Redis, atau memori saat lokal) dan logika tugas |
-| `hooks/kantor-ai.mjs` | Skrip hook Claude Code |
-| `install-hooks.mjs` | Memasang atau melepas hook di `~/.claude/settings.json` |
-| `scripts/send-test.mjs` | Mengirim satu tugas uji |
+| `lib/team.js` | Susunan tim dan jam kerja |
+| `lib/board.js` | Project, task, feed, statistik, penugasan otomatis, review → done, migrasi data lama |
+| `lib/store.js` | Penyimpanan: Upstash Redis, atau file `data/kantor-ai.json` saat lokal |
+| `lib/http.js` | Kunci baca/tulis dan penanganan error API |
+| `api/state.js` | `GET` semua data untuk halaman |
+| `api/projects.js` | `POST` membuat, `DELETE ?id=` menghapus project |
+| `api/tasks.js` | `POST` membuat, `PATCH ?id=` mengubah, `DELETE ?id=` menghapus task |
+| `api/event.js` | Hook Claude Code (opsional) |
+| `public/index.html` | Kerangka halaman dan gaya tampilan |
+| `public/js/` | Modul tanpa build step: `api.js`, `dashboard.js`, `office.js`, `scene.js`, `characters.js`, `behaviors.js`, `navgrid.js` |
 | `local-server.mjs` | Menjalankan semuanya di komputer sendiri |
+| `hooks/`, `install-hooks.mjs`, `scripts/send-test.mjs` | Hook Claude Code opsional |
 
-Syarat: Node.js 18 atau lebih baru.
+Syarat: Node.js 18 atau lebih baru. Tidak ada build step. Three.js dimuat dari CDN.
 
-## 1. Coba di komputer sendiri
+## 1. Jalankan di komputer sendiri
 
 ```bash
 npm install
@@ -35,63 +54,55 @@ cp .env.example .env        # Windows: copy .env.example .env
 npm run local
 ```
 
-Buka `http://localhost:3000/?key=ISI_OFFICE_READ_KEY`. Kunci akan diingat browser.
+Buka `http://localhost:3000`, lalu klik **Kunci** dan isi kedua kunci. Kunci disimpan di browser itu saja. Tanpa kunci tulis, dashboard hanya bisa dilihat.
 
-Di terminal lain, pasang hook ke alamat lokal:
-
-```bash
-node install-hooks.mjs --url http://localhost:3000 --key ISI_OFFICE_WRITE_KEY
-npm run test-event
-```
-
-Mulai ulang Claude Code, lalu kirim prompt apa saja. Manager langsung bergerak.
-
-Mode lokal menyimpan data di `data/kantor-ai.json`, jadi riwayat tugas, hitungan hari, dan jumlah tugas selesai tetap ada walau server dimatikan. Hapus file itu untuk memulai kantor dari Hari ke-1 lagi.
+Data lokal tersimpan di `data/kantor-ai.json`. Hapus file itu untuk memulai lagi dari Hari ke-1.
 
 ## 2. Upload ke Vercel
 
-1. Upload folder ini ke repository GitHub. File `.env` dan `node_modules` sudah diabaikan oleh `.gitignore`.
-2. Di vercel.com pilih **Add New → Project**, impor repository tersebut. Framework Preset: **Other**. Klik **Deploy**.
-3. Buka project, lalu tab **Storage**. Pilih **Upstash for Redis** dari Marketplace dan sambungkan ke project ini. Vercel otomatis menambahkan variabel `KV_REST_API_URL` dan `KV_REST_API_TOKEN`.
-4. Di **Settings → Environment Variables**, tambahkan:
-   - `OFFICE_WRITE_KEY`: kunci untuk hook (teks acak panjang)
-   - `OFFICE_READ_KEY`: kunci untuk membuka halaman
-5. Buka **Deployments → Redeploy** supaya variabel baru terbaca.
-6. Buka `https://nama-project.vercel.app/?key=ISI_OFFICE_READ_KEY`.
-
-Lalu arahkan hook di komputer Anda ke alamat online:
-
-```bash
-node install-hooks.mjs --url https://nama-project.vercel.app --key ISI_OFFICE_WRITE_KEY
-npm run test-event
-```
-
-Menjalankan installer lagi akan mengganti pemasangan lama, jadi tidak ada hook dobel. Isi `settings.json` lain tetap utuh, dan cadangannya disimpan sebagai `settings.json.bak-kantor-ai`.
+1. Hubungkan repository GitHub ini di vercel.com (**Add New → Project**), Framework Preset: **Other**.
+2. Tab **Storage**: pilih **Upstash for Redis** dan sambungkan ke project. Variabel `KV_REST_API_URL` dan `KV_REST_API_TOKEN` (atau versi berawalan) otomatis ditambahkan.
+3. **Settings → Environment Variables**: tambahkan `OFFICE_WRITE_KEY` dan `OFFICE_READ_KEY`.
+4. **Deployments → Redeploy**.
+5. Buka alamat Vercel Anda, klik **Kunci**, dan isi kedua kunci. Label di panel Task harus **TERHUBUNG**. Kalau tertulis **TANPA PENYIMPANAN**, Redis belum tersambung.
 
 Untuk membuat kunci acak: `node -e "console.log(crypto.randomUUID())"`
 
-## Progres yang tersimpan
+## Pindah dari versi lama
 
-- **Hari ke-N** dihitung dari tanggal kantor pertama kali menerima tugas atau dibuka, dan terus bertambah setiap hari.
-- **Tugas hari ini** dan **total tugas selesai** disimpan di server, jadi tetap sama di semua perangkat.
-- **30 tugas terakhir** beserta hasilnya tersimpan dan langsung tampil saat halaman dibuka.
-- Di Vercel semua ini disimpan di Upstash Redis. Di mode lokal disimpan di `data/kantor-ai.json`.
-- Batas "hari ini" memakai zona waktu WIB. Untuk zona lain, atur `OFFICE_TZ_OFFSET_MINUTES` (contoh WITA: `480`, WIT: `540`).
+Saat pertama dijalankan, 30 tugas terakhir dari versi sebelumnya (kantor yang bereaksi pada prompt Claude Code) otomatis dipindahkan menjadi task Done di project **Arsip**. Hitungan hari dan total tugas selesai tetap dilanjutkan.
 
-## Privasi
+## Hook Claude Code (opsional, nonaktif secara default)
 
-- Isi prompt dan ringkasan jawaban Claude disimpan di Redis selama 14 hari, maksimal 30 tugas terakhir.
-- Siapa pun yang tahu `OFFICE_READ_KEY` bisa membacanya. Kalau variabel itu dikosongkan, halaman bisa dibaca siapa saja yang tahu alamatnya.
-- Mau animasinya saja tanpa mengirim isi prompt? Pasang dengan `--no-text`. Halaman hanya akan menampilkan "Tugas baru di <nama folder>".
+Hook bisa membuat task otomatis dari Claude Code. Satu sesi Claude Code menjadi satu task Open di project "Claude Code", dan prompt berikutnya di sesi yang sama ditambahkan sebagai catatan. Saat Claude selesai menjawab, task pindah ke **Review** dengan badge "Menunggu persetujuan Anda", lalu Anda yang memindahkannya ke Done.
 
-## Biaya dan batasan
+1. Tambahkan `CLAUDE_HOOK_ENABLED=1` di `.env` atau di environment variables Vercel, lalu deploy ulang.
+2. Pasang hook di komputer Anda:
+   ```bash
+   node install-hooks.mjs --url https://alamat-anda.vercel.app --key ISI_OFFICE_WRITE_KEY
+   npm run test-event
+   ```
+3. Mulai ulang Claude Code. Hook berlaku untuk semua proyek, baik di terminal, ekstensi IDE, maupun tab Code di aplikasi Claude (sesi Local). Sesi Cloud dan chat di claude.ai tidak memicunya.
 
-- Halaman mengecek server tiap 4 detik selama tab terbuka, dan berhenti saat tab disembunyikan. Satu kali cek = satu perintah Redis. Pastikan kuota paket gratis Upstash Anda cukup.
-- Paket Hobby Vercel ditujukan untuk pemakaian pribadi non-komersial. Untuk pemakaian kantor, cek ketentuan Vercel atau gunakan paket Pro.
-- Tugas yang berstatus "dikerjakan" lebih dari 45 menit tanpa event selesai (misalnya Claude Code ditutup di tengah jalan) akan ditandai "terhenti".
+Tambahkan `--no-text` supaya isi prompt tidak dikirim. Untuk melepas hook: `node install-hooks.mjs --uninstall`.
 
-## Melepas hook
+## API singkat
+
+Semua penulisan butuh header `x-office-write: <OFFICE_WRITE_KEY>`. Pembacaan butuh `x-office-key: <OFFICE_READ_KEY>` bila kunci baca diatur.
 
 ```bash
-node install-hooks.mjs --uninstall
+# buat task
+curl -X POST https://alamat-anda/api/tasks -H "x-office-write: KUNCI" -H "content-type: application/json" \
+  -d '{"title":"Landing page promo","projectId":"p_kantor","priority":"high"}'
+# mulai kerjakan / selesaikan
+curl -X PATCH "https://alamat-anda/api/tasks?id=ID_TASK" -H "x-office-write: KUNCI" -H "content-type: application/json" -d '{"status":"in_progress"}'
+curl -X PATCH "https://alamat-anda/api/tasks?id=ID_TASK" -H "x-office-write: KUNCI" -H "content-type: application/json" -d '{"status":"done"}'
 ```
+
+## Performa dan batasan
+
+- Animasi dibatasi 30 fps. **Mode hemat** menurunkannya ke 24 fps, mematikan bayangan, dan memakai resolusi standar. Mode ini aktif otomatis di HP atau perangkat lemah, dan juga saat frame rate terus turun.
+- Semua animasi berhenti saat tab disembunyikan. Pengecekan data (tiap 4 detik, satu perintah Redis) juga berhenti.
+- Posisi dan aktivitas santai karyawan disimulasikan di masing-masing browser, jadi dua perangkat bisa menampilkan aktivitas santai yang berbeda. Status task, siapa memegang task apa, dan urutan kejadian selalu sama.
+- Paket Hobby Vercel ditujukan untuk pemakaian pribadi non-komersial. Untuk pemakaian kantor, cek ketentuan Vercel.
+- Batas "hari ini" memakai WIB. Atur `OFFICE_TZ_OFFSET_MINUTES` untuk zona lain (WITA `480`, WIT `540`).

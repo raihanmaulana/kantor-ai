@@ -23,10 +23,12 @@ const send = async (body) => {
 
 const session = 'uji-' + Date.now();
 try {
-  console.log('Mengirim tugas uji…', await send({ type: 'prompt', session_id: session, project: 'uji-coba', prompt: 'Tugas uji: cek koneksi Kantor AI' }));
-  console.log('Tunggu 8 detik, lihat Manager menyerahkan tugas ke Raihan di halaman kantor…');
+  const first = JSON.parse(await send({ type: 'prompt', session_id: session, project: 'uji-coba', prompt: 'Tugas uji: cek koneksi hook Claude Code' }));
+  if (first.ignored) { console.log('Server menerima kunci, tapi hook dimatikan: ' + first.ignored); process.exit(0); }
+  console.log('Task uji dibuat. Kartika sedang menulisnya ke papan…');
   await new Promise((r) => setTimeout(r, 8000));
-  console.log('Mengirim hasil…', await send({ type: 'stop', session_id: session, project: 'uji-coba', result: 'Koneksi berhasil. Hook Claude Code → Kantor AI berjalan.' }));
+  await send({ type: 'stop', session_id: session, project: 'uji-coba', result: 'Koneksi berhasil. Hook Claude Code → Kantor AI berjalan.' });
+  console.log('Task uji pindah ke Review dan menunggu persetujuan Anda di dashboard.');
 } catch (e) {
   console.error('Gagal:', e.message);
   process.exit(1);
