@@ -142,9 +142,10 @@ export function initOffice({ stage, onSelectEmployee }) {
   }
   function shouldBeHere(a) { return inWorkHours() || hasDuty(a); }
 
+  const ROLE_ORDER = ['coordinator', 'engineer', 'designer', 'treasurer', 'manager'];
   function buildTeam(team) {
     let slot = 0;
-    const order = [...team].sort((x, y) => ['coordinator', 'engineer', 'designer', 'manager'].indexOf(x.role) - ['coordinator', 'engineer', 'designer', 'manager'].indexOf(y.role));
+    const order = [...team].sort((x, y) => ROLE_ORDER.indexOf(x.role) - ROLE_ORDER.indexOf(y.role));
     for (const emp of order) {
       const ch = new Character(scene, emp, world.nav);
       const a = new Agent(ch, emp, O);
@@ -192,6 +193,7 @@ export function initOffice({ stage, onSelectEmployee }) {
     }
     const wait = waitingTaskOf(a);
     if (wait) return { kind: 'work', name: 'waiting', status: 'Menunggu persetujuan Anda', steps: [S.sit(O.seatOf(a)), S.act('sit', { dur: 20, status: 'Menunggu persetujuan Anda: ' + short(wait.title, 28) })] };
+    if (a.role === 'treasurer' && fin.enabled && !(a.cooldown.vault > simT) && Math.random() < 0.25) { const v = vaultCheckScript(a); if (v) { a.cooldown.vault = simT + rand(240, 420); return v; } }
     return chooseIdle(a, O, simT) || { kind: 'idle', name: 'desk', status: 'Di meja', steps: [S.sit(O.seatOf(a)), S.act('sit', { dur: rand(10, 20) })] };
   }
 
@@ -344,7 +346,7 @@ export function initOffice({ stage, onSelectEmployee }) {
   api.on('state', (next, prev) => stateHandler(next, prev));
   function stateHandler(next, prev) {
     if (!next || !next.team) return;
-    if (!teamBuilt) { buildTeam(next.team); teamBuilt = true; prev = null; }
+    if (!teamBuilt) { buildTeam(next.team); teamBuilt = true; prev = null; pollFinance(); }
     const prevMap = new Map(((prev && prev.tasks) || []).map((t) => [t.id, t]));
     const coord = agents.find((a) => a.role === 'coordinator') || agents[0];
     if (!prev) {
@@ -398,6 +400,140 @@ export function initOffice({ stage, onSelectEmployee }) {
     world.drawBoard([open, prog, done], s.projects, s.team);
   }
 
+  /* ---------- keuangan (Arus) → brankas dan Bendahara ---------- */
+  const rupiah = (v) => (v < 0 ? '−Rp ' : 'Rp ') + Math.abs(Math.round(v)).toLocaleString('id-ID');
+  const signed = (v) => (v > 0 ? '+' : '') + rupiah(v);
+  const shortRp = (v) => { const a = Math.abs(v); return a >= 1e9 ? (a / 1e9).toLocaleString('id-ID', { maximumFractionDigits: 1 }) + ' M' : a >= 1e6 ? (a / 1e6).toLocaleString('id-ID', { maximumFractionDigits: 1 }) + ' jt' : a >= 1e3 ? Math.round(a / 1e3) + ' rb' : String(a); };
+  const fin = { enabled: false, data: null, shown: new Map(), target: new Map(), seen: new Set(), first: true, unit: 100000, color: '#d8534f', labels: [], legend: null, counts: [], want: [], animT: 0, current: null, timer: 0 };
+  const NOTE = [[1e4, '#9b6fb5'], [2e4, '#5fa36b'], [5e4, '#3f7fc4'], [1e5, '#d8534f']];
+  const treasurer = () => agents.find((x) => x.role === 'treasurer');
+
+  async function pollFinance() {
+    clearTimeout(fin.timer);
+    let next = 15000;
+    if (document.visibilityState === 'hidden') next = 5000;
+    else try {
+      const r = await fetch('/api/finance', { headers: api.headers(), cache: 'no-store' });
+      const j = r.ok ? await r.json() : null;
+      if (r.status === 401) next = 30000;
+      else if (j && j.enabled === false) { fin.enabled = false; showVault(false); if (j.error) console.warn('[Keuangan]', j.error); next = 120000; }
+      else if (j && j.error) { console.warn('[Keuangan]', j.error); next = 60000; }
+      else if (j) handleFinance(j);
+    } catch { next = 30000; }
+    fin.timer = setTimeout(pollFinance, next);
+  }
+  function chooseUnit(pockets) {
+    const max = Math.max(0, ...pockets.map((p) => p.saldo));
+    const steps = [1e4, 2e4, 5e4]; for (let e = 5; e < 13; e++) steps.push(10 ** e, 2 * 10 ** e, 5 * 10 ** e);
+    const unit = steps.find((u) => max / u <= 96) || steps[steps.length - 1];
+    fin.unit = unit; fin.color = (NOTE.find(([u]) => unit <= u) || NOTE[3])[1];
+  }
+  const bundlesFor = (v) => (v > 0 ? Math.min(120, Math.max(1, Math.round(v / fin.unit))) : 0);
+  function showVault(on) {
+    world.showVaultSlots(on && fin.data ? Math.min(8, fin.data.pockets.length) : 0);
+    if (!on) { world.setVault([], fin.color); fin.counts = []; fin.want = []; }
+    for (const L of fin.labels) L.el.classList.toggle('hide', !on);
+    if (fin.legend) fin.legend.el.classList.toggle('hide', !on);
+  }
+  function syncLabels() {
+    const ps = fin.data.pockets.slice(0, 8);
+    while (fin.labels.length < ps.length) {
+      const el = document.createElement('div'); el.className = 'mtag'; el.innerHTML = '<b></b><span class="amt"></span>'; labels.appendChild(el);
+      fin.labels.push({ el, nm: el.querySelector('b'), amt: el.querySelector('.amt'), idx: fin.labels.length, slot: world.vaultSlots[fin.labels.length], count: 0, hidden: false, last: null });
+    }
+    fin.labels.forEach((L, i) => {
+      const p = ps[i]; L.hidden = !p; L.el.classList.toggle('hide', !p); if (!p) return;
+      L.nm.textContent = p.name;
+      const v = fin.shown.get(p.id) ?? p.saldo;
+      if (L.last !== v) { if (L.last !== null) { L.el.classList.add('flash'); setTimeout(() => L.el.classList.remove('flash'), 1400); } L.last = v; L.amt.textContent = rupiah(v); L.el.classList.toggle('neg', v < 0); }
+    });
+    if (!fin.legend) { const el = document.createElement('div'); el.className = 'mtag legend'; labels.appendChild(el); fin.legend = { el, hidden: false, legendOnly: true, slot: { x: 13.35, z: -2.55 } }; }
+    fin.legend.el.textContent = '1 ikat ≈ Rp ' + shortRp(fin.unit);
+  }
+  function refreshVault() {
+    const ps = fin.data.pockets.slice(0, 8);
+    fin.want = ps.map((p) => bundlesFor(fin.shown.get(p.id) ?? p.saldo));
+    fin.labels.forEach((L, i) => { L.count = fin.want[i] || 0; });
+    syncLabels();
+  }
+  function animateVault(dt) {
+    if (!fin.want.length && !fin.counts.length) return;
+    fin.animT -= dt; if (fin.animT > 0) return; fin.animT = 0.045;
+    let changed = false;
+    const n = Math.max(fin.want.length, fin.counts.length);
+    for (let i = 0; i < n; i++) {
+      const c = fin.counts[i] || 0, w = fin.want[i] || 0;
+      if (c !== w) { fin.counts[i] = c + Math.sign(w - c) * Math.max(1, Math.round(Math.abs(w - c) / 12)); changed = true; }
+    }
+    fin.counts.length = fin.want.length;
+    if (changed) world.setVault(fin.counts, fin.color);
+  }
+  function handleFinance(j) {
+    const firstTime = fin.first;
+    fin.enabled = true; fin.data = j;
+    const ps = j.pockets.slice(0, 8);
+    const oldUnit = fin.unit; chooseUnit(j.pockets);
+    if (oldUnit !== fin.unit) fin.counts = [];
+    for (const p of ps) if (!fin.shown.has(p.id)) fin.shown.set(p.id, p.saldo);
+    showVault(true);
+    const fresh = j.events.filter((e) => !fin.seen.has(e.id));
+    j.events.forEach((e) => fin.seen.add(e.id));
+    if (firstTime) { fin.first = false; refreshVault(); return; }
+    const changed = ps.filter((p) => fin.shown.get(p.id) !== p.saldo && fin.target.get(p.id) !== p.saldo);
+    changed.forEach((p) => fin.target.set(p.id, p.saldo));
+    refreshVault();
+    if (!fresh.length && !changed.length) return;
+    const t = treasurer();
+    if (!t) { changed.forEach((p) => { fin.shown.set(p.id, p.saldo); fin.target.delete(p.id); }); refreshVault(); return; }
+    ensureHere(t);
+    t.enqueue(financeScript(t, fresh.reverse().slice(-4), changed));
+  }
+  function applyPocket(id) {
+    const p = fin.data && fin.data.pockets.find((x) => x.id === id); if (!p) return;
+    fin.shown.set(id, p.saldo); fin.target.delete(id); refreshVault();
+  }
+  function financeScript(a, events, changed) {
+    const steps = [S.sit(O.seatOf(a))];
+    for (const e of events) steps.push(S.call(() => (fin.current = e.id)), S.act('type', { dur: rand(2.4, 3.4), status: 'Mencatat: ' + short(e.label, 22) + ' ' + signed(e.amount) }));
+    if (!events.length) steps.push(S.act('type', { dur: 2, status: 'Mencocokkan saldo dengan Arus' }));
+    steps.push(S.call(() => (fin.current = null)));
+    const ps = fin.data.pockets.slice(0, 8);
+    for (const p of changed) {
+      const i = ps.indexOf(p), slot = world.vaultSlots[i]; if (!slot) continue;
+      const delta = p.saldo - (fin.shown.get(p.id) ?? p.saldo), add = delta > 0;
+      steps.push(
+        S.call((ag) => { ag.ch.props({ paper: add }); ag.setStatus((add ? 'Menyimpan ' : 'Mengambil ') + rupiah(Math.abs(delta)) + (add ? ' ke ' : ' dari ') + p.name); }),
+        S.walk(slot.front), S.face(slot.front.rot),
+        S.act('take', { dur: 1.4 }),
+        S.call((ag) => { applyPocket(p.id); ag.ch.props({ paper: !add }); ag.setStatus('Saldo ' + p.name + ': ' + rupiah(p.saldo)); }),
+        S.act('stand', { dur: 0.8 }),
+      );
+    }
+    return { kind: 'task', name: 'finance', status: 'Ada catatan keuangan baru', steps,
+      onEnd: () => { fin.current = null; for (const p of changed) if (fin.target.has(p.id)) applyPocket(p.id); } };
+  }
+  function vaultCheckScript(a) {
+    if (!fin.data || !fin.data.pockets.length) return null;
+    const i = (Math.random() * Math.min(8, fin.data.pockets.length)) | 0, slot = world.vaultSlots[i], p = fin.data.pockets[i];
+    return { kind: 'idle', name: 'vault', status: 'Menghitung uang di brankas', steps: [S.walk(slot.front), S.face(slot.front.rot), S.act('listenStand', { dur: rand(4, 6), status: 'Menghitung uang ' + p.name })] };
+  }
+  function drawLedger(g, a) {
+    const w = 256, h = 160, j = fin.data;
+    g.fillStyle = '#8a92a8'; g.font = '600 10px sans-serif'; g.fillText('buku kas · Arus', 46, 11);
+    if (!fin.enabled || !j) { g.fillStyle = '#e6e8ef'; g.font = '700 14px sans-serif'; g.fillText('Belum terhubung ke Arus', 34, 84); return; }
+    const total = j.pockets.reduce((t, p) => t + p.saldo, 0);
+    g.fillStyle = '#8a92a8'; g.font = '600 10px sans-serif'; g.fillText('TOTAL SALDO', 12, 32);
+    g.fillStyle = '#ffd166'; g.font = '700 17px sans-serif'; g.fillText(rupiah(total), 12, 51);
+    g.fillStyle = '#8a92a8'; g.font = '500 10px sans-serif'; g.fillText('keluar bulan ini ' + rupiah(j.monthSpent || 0), 132, 32);
+    g.font = '600 11px sans-serif';
+    j.events.slice(0, 6).forEach((e, i) => {
+      const y = 72 + i * 15, hot = fin.current === e.id;
+      if (hot) { g.fillStyle = 'rgba(255,209,102,.18)'; g.fillRect(6, y - 11, w - 12, 14); }
+      g.fillStyle = hot ? '#ffffff' : '#c9cfdd'; g.fillText(short(e.label, 20), 12, y);
+      const s = signed(e.amount); g.fillStyle = e.amount < 0 ? '#ff8a8a' : '#5cc184'; g.fillText(s, w - 12 - g.measureText(s).width, y);
+    });
+  }
+
   /* ---------- monitor ---------- */
   function paintEmpty(d) {
     const g = d.tex.userData.g; g.fillStyle = '#0b0e17'; g.fillRect(0, 0, 256, 160); g.fillStyle = '#39415c'; g.font = '700 18px sans-serif'; g.fillText('Meja kosong', 72, 86); d.tex.needsUpdate = true;
@@ -424,6 +560,7 @@ export function initOffice({ stage, onSelectEmployee }) {
     g.fillStyle = '#1d2335'; g.fillRect(0, 0, w, 16);
     ['#ff6b6b', '#ffd166', '#5cc184'].forEach((c, i) => { g.fillStyle = c; g.beginPath(); g.arc(10 + i * 11, 8, 3, 0, Math.PI * 2); g.fill(); });
     const wt = workTaskOf(a);
+    if (a.role === 'treasurer' && !wt) { drawLedger(g, a); d.tex.needsUpdate = true; return; }
     if (a.role === 'manager') {
       const s = api.state || { stats: {} };
       g.fillStyle = '#8a92a8'; g.font = '600 10px sans-serif'; g.fillText('ringkasan tim', 46, 11);
@@ -562,6 +699,16 @@ export function initOffice({ stage, onSelectEmployee }) {
     }
   }
 
+  function placeMoneyLabels() {
+    for (const L of fin.legend ? [...fin.labels, fin.legend] : fin.labels) {
+      if (L.hidden || !fin.enabled) continue;
+      tmp.set(L.slot.x, L.legendOnly ? 1.62 : world.vaultTopY(L.idx, L.count) + 0.12, L.slot.z); tmp.project(camera);
+      const off = tmp.z > 1 || Math.abs(tmp.x) > 1.2 || Math.abs(tmp.y) > 1.2;
+      L.el.style.visibility = off ? 'hidden' : '';
+      L.el.style.transform = `translate(${((tmp.x * 0.5 + 0.5) * W).toFixed(1)}px, ${((-tmp.y * 0.5 + 0.5) * H).toFixed(1)}px) translate(-50%, -100%)`;
+    }
+  }
+
   /* ---------- pilih karyawan ---------- */
   const ray = new THREE.Raycaster(), ndc = new THREE.Vector2();
   function pick(e) {
@@ -618,7 +765,8 @@ export function initOffice({ stage, onSelectEmployee }) {
     updateCamera(real);
     if (q.shadow && dt > 0) { shadowFlip ^= 1; if (shadowFlip) renderer.shadowMap.needsUpdate = true; }
     renderer.render(scene, camera);
-    placeLabels();
+    placeLabels(); placeMoneyLabels();
+    if (dt > 0) animateVault(real);
     requestAnimationFrame(frame);
   }
 

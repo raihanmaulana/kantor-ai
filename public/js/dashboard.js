@@ -359,16 +359,16 @@ export function showProfile(id, activityText) {
   const e = s.team.find((x) => x.id === id); if (!e) { box.hidden = true; return; }
   const mine = s.tasks.filter((t) => t.assigneeId === id && (t.status === 'in_progress' || t.status === 'review'));
   const doneToday = s.tasks.filter((t) => t.assigneeId === id && t.status === 'done' && t.doneAt && new Date(t.doneAt).toDateString() === new Date().toDateString()).length;
-  box.replaceChildren(
+  box.replaceChildren(...[
     el('div', { class: 'pf-head' },
       el('span', { class: 'av big', style: `--c:${e.look.shirt}`, text: initials(e.name) }),
       el('div', {}, el('strong', { text: e.name }), el('small', { text: e.title })),
       el('button', { class: 'x', 'aria-label': 'Tutup profil', onclick: () => { box.hidden = true; if (opts.onCloseProfile) opts.onCloseProfile(); } }, '×')),
     el('p', { class: 'pf-act', text: activityText || '' }),
-    el('div', { class: 'pf-sub', text: e.role === 'manager' ? 'Menyetujui presentasi task yang selesai.' : e.role === 'coordinator' ? 'Menulis setiap task baru ke papan.' : mine.length ? `Memegang ${mine.length} task` : 'Sedang tidak memegang task.' }),
+    el('div', { class: 'pf-sub', text: e.role === 'manager' ? 'Menyetujui presentasi task yang selesai.' : e.role === 'coordinator' ? 'Menulis setiap task baru ke papan.' : e.role === 'treasurer' ? 'Mencatat keuangan dari Arus dan mengurus brankas.' : mine.length ? `Memegang ${mine.length} task` : 'Sedang tidak memegang task.' }),
     mine.length ? el('ul', { class: 'pf-tasks' }, ...mine.map((t) => el('li', {}, el('button', { class: 'link', onclick: () => openTaskDialog(t.id), text: t.title }), t.status === 'review' ? el('span', { class: 'badge review mini' }, 'Presentasi') : null))) : null,
-    el('div', { class: 'pf-foot', text: `Selesai hari ini: ${doneToday}` }),
-  );
+    e.role === 'treasurer' ? null : el('div', { class: 'pf-foot', text: `Selesai hari ini: ${doneToday}` }),
+  ].filter(Boolean));
   box.hidden = false;
 }
 

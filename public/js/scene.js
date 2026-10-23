@@ -478,6 +478,56 @@ export function createWorld(scene) {
   };
   W.smokeRoom = { ...SR, ash: ASH };
 
+  /* ================= brankas keuangan (kanan, antara lobi lift dan pantry) ================= */
+  const VT = { x: 12.2, z: 0.3 };
+  carpet(3.5, 5.8, 0x2f3a4a, VT.x, VT.z);
+  // lemari besi
+  const SAFE = { x: 13.35, z: -2.55 };
+  rbox(0.9, 1.2, 0.75, 0.04, M(0x55606f, { metalness: 0.55, roughness: 0.4 }), SAFE.x, 0.6, SAFE.z);
+  const dial = cyl(0.12, 0.12, 0.05, M(0xc9ced8, { metalness: 0.8, roughness: 0.25 }), SAFE.x - 0.46, 0.72, SAFE.z, 18); dial.rotation.z = Math.PI / 2;
+  box(0.03, 0.05, 0.3, M(0xc9ced8, { metalness: 0.8, roughness: 0.25 }), SAFE.x - 0.47, 0.45, SAFE.z);
+  nav.box(SAFE.x, SAFE.z, 0.9, 0.75);
+  const vPlate = plateTex('BRANKAS');
+  [0, Math.PI].forEach((r) => { const m = mesh(new THREE.PlaneGeometry(0.66, 0.16), new THREE.MeshBasicMaterial({ map: vPlate, toneMapped: false }), SAFE.x, 1.42, SAFE.z + (r ? -0.01 : 0.01), null, false); m.rotation.y = r; });
+  // alas tumpukan uang: 2 kolom × 4 baris, satu per sumber dana
+  const VSLOTS = [];
+  [-1.55, -0.25, 1.05, 2.35].forEach((z) => [11.45, 12.85].forEach((x) => VSLOTS.push({ x, z })));
+  const pedMat = M(0x3a4458), pedTop = M(0xd9c7a8);
+  W.vaultSlots = VSLOTS.map((v) => {
+    const g = new THREE.Group(); g.position.set(v.x, 0, v.z); g.visible = false; scene.add(g);
+    rbox(0.86, 0.3, 0.64, 0.04, pedMat, 0, 0.15, 0, g); box(0.88, 0.02, 0.66, pedTop, 0, 0.31, 0, g);
+    return { ...v, group: g, front: { x: v.x, z: v.z + 0.62, rot: Math.PI }, top: 0.32, navOn: false };
+  });
+  // ikat uang memakai instancing supaya ratusan ikat tetap ringan
+  const BMAX = 8 * 120;
+  const bundleMesh = new THREE.InstancedMesh(new THREE.BoxGeometry(0.17, 0.034, 0.08), new THREE.MeshStandardMaterial({ roughness: 0.7 }), BMAX);
+  const strapMesh = new THREE.InstancedMesh(new THREE.BoxGeometry(0.035, 0.037, 0.083), new THREE.MeshStandardMaterial({ color: 0xf4efe1, roughness: 0.8 }), BMAX);
+  bundleMesh.count = strapMesh.count = 0; bundleMesh.castShadow = true; bundleMesh.frustumCulled = strapMesh.frustumCulled = false; scene.add(bundleMesh, strapMesh);
+  const tmpM = new THREE.Matrix4(), tmpQ = new THREE.Quaternion(), tmpV = new THREE.Vector3(), one = new THREE.Vector3(1, 1, 1), tmpC = new THREE.Color();
+  // counts[i] = jumlah ikat di alas i; color = warna uang (sesuai pecahan)
+  W.setVault = (counts, color) => {
+    let k = 0; tmpC.set(color);
+    counts.forEach((c, i) => {
+      const v = W.vaultSlots[i]; if (!v) return;
+      for (let j = 0; j < c && k < BMAX; j++, k++) {
+        const layer = Math.floor(j / 24), r = j % 24, col = r % 4, row = Math.floor(r / 4);
+        const jitter = Math.sin(j * 12.9898 + i) * 0.012;
+        tmpV.set(v.x - 0.285 + col * 0.19 + jitter, v.top + 0.018 + layer * 0.036, v.z - 0.225 + row * 0.09);
+        tmpQ.setFromAxisAngle(new THREE.Vector3(0, 1, 0), jitter * 2);
+        tmpM.compose(tmpV, tmpQ, one);
+        bundleMesh.setMatrixAt(k, tmpM); strapMesh.setMatrixAt(k, tmpM); bundleMesh.setColorAt(k, tmpC);
+      }
+    });
+    bundleMesh.count = strapMesh.count = k;
+    bundleMesh.instanceMatrix.needsUpdate = strapMesh.instanceMatrix.needsUpdate = true;
+    if (bundleMesh.instanceColor) bundleMesh.instanceColor.needsUpdate = true;
+  };
+  W.showVaultSlots = (n) => W.vaultSlots.forEach((v, i) => {
+    v.group.visible = i < n;
+    if (i < n && !v.navOn) { nav.box(v.x, v.z, 0.86, 0.64, 0.08); v.navOn = true; }
+  });
+  W.vaultTopY = (i, count) => { const v = W.vaultSlots[i]; return v.top + Math.ceil(Math.max(1, count) / 24) * 0.036; };
+
   /* ================= tanaman ================= */
   const plant = (x, z, s) => {
     cyl(0.22 * s, 0.16 * s, 0.42 * s, M(0xd6c4ab), x, 0.21 * s, z, 14);
@@ -510,7 +560,7 @@ export function createWorld(scene) {
     pingpong: [P(PP.x - 1.75, PP.z, Math.PI / 2), P(PP.x + 1.75, PP.z, -Math.PI / 2)],
     stretch: [P(5.6, 3.0, 0.4), P(7.4, 2.6, -0.3), P(-5.2, 3.2, 0.2)],
     smoke: [P(ASH.x - 0.62, ASH.z - 0.3), P(ASH.x + 0.45, ASH.z - 0.55), P(ASH.x - 0.35, ASH.z + 0.65)],
-    phone: [[P(-11.0, 2.4, 0.2), P(-9.4, 2.7, -0.2)], [P(13.2, 1.2, Math.PI / 2), P(13.2, -0.2, Math.PI / 2)], [P(-6.6, 3.1, 0.3), P(-5.0, 3.4, 0.3)], [P(12.4, -5.6, Math.PI), P(11.2, -5.8, Math.PI)]],
+    phone: [[P(-11.0, 2.4, 0.2), P(-9.4, 2.7, -0.2)], [P(9.0, 2.3, 1.2), P(9.5, 3.3, 1.2)], [P(-6.6, 3.1, 0.3), P(-5.0, 3.4, 0.3)], [P(12.4, -5.6, Math.PI), P(11.2, -5.8, Math.PI)]],
     water: P(7.8, 6.85, 0),
     liftCall: P(12.1, -6.4, Math.PI),
   };

@@ -8,6 +8,7 @@ Dashboard task dan kantor 3D yang hidup, di lantai 38 sebuah gedung. Anda mengel
 | Kartika | Project Coordinator | Menulis setiap task baru ke papan task |
 | Irham, Fariz | Engineer | Mengerjakan task, dibagi rata berdasarkan beban kerja |
 | Nadia | Designer | Otomatis mengambil task berlabel desain |
+| Dewi | Bendahara | Mencatat aktivitas keuangan dari Arus dan mengurus brankas |
 
 Nama, peran, warna baju, kebiasaan saat rehat, dan jam kerja diatur di satu file: `lib/team.js`.
 
@@ -27,6 +28,25 @@ Done             ──▶ penanggung jawab membawa laptop ke ruang meeting, Rai
 - Jam kerja 08.00–17.00. Setelahnya, yang tidak memegang task pulang lewat lift, sementara yang masih memegang task lembur. Pagi hari mereka datang dari lift. Task baru di malam hari memanggil orangnya kembali.
 - Langit, matahari, dan lampu kota mengikuti jam di perangkat yang membuka halaman.
 
+## Keuangan dari Arus (opsional)
+
+Kantor bisa menampilkan data dari aplikasi pengelola uang **Arus** (repo money-manager) yang memakai Supabase:
+
+- **Brankas** di sisi kanan kantor berisi satu alas per sumber dana (BRI, GoPay, dan seterusnya, maksimal 8). Tumpukan ikat uangnya setinggi saldonya. Satu ikat mewakili nominal yang menyesuaikan saldo terbesar, dan keterangannya tertulis di atas lemari besi.
+- Saat Anda menambah catatan, membayar tagihan, menabung, atau memindah dana di Arus, **Dewi (Bendahara)** mencatatnya di mejanya. Monitornya menampilkan buku kas. Setelah itu ia berjalan ke brankas untuk menambah atau mengambil uang, dan tumpukannya ikut berubah. Di malam hari ia datang lewat lift.
+- Data dicek setiap 15 detik selama halaman terbuka. Kantor AI **hanya membaca** dan tidak pernah mengubah data Arus. Saldo dihitung dengan rumus yang sama seperti halaman Sumber dana di Arus.
+
+Pengaturan di Vercel (**Settings → Environment Variables**), lalu Redeploy:
+
+| Variabel | Isi |
+|---|---|
+| `SUPABASE_URL` | Sama dengan `NEXT_PUBLIC_SUPABASE_URL` di project Arus |
+| `SUPABASE_SERVICE_ROLE_KEY` | Supabase → Project Settings → API → **service_role**. Rahasia, hanya dipakai di server |
+| `FINANCE_OWNER_EMAIL` | Email akun Arus yang datanya ditampilkan |
+| `OFFICE_READ_KEY` | Wajib diisi. Tanpa kunci baca, data keuangan tidak ditampilkan |
+
+Untuk mencoba tanpa Supabase, isi `FINANCE_DEMO=1`. Brankas akan memakai data contoh yang berubah sendiri setiap 30–60 detik.
+
 ## Isi folder
 
 | File | Fungsi |
@@ -39,6 +59,7 @@ Done             ──▶ penanggung jawab membawa laptop ke ruang meeting, Rai
 | `api/projects.js` | `POST` membuat, `DELETE ?id=` menghapus project |
 | `api/tasks.js` | `POST` membuat, `PATCH ?id=` mengubah, `DELETE ?id=` menghapus task |
 | `api/event.js` | Hook Claude Code (opsional) |
+| `lib/finance.js`, `api/finance.js` | Membaca saldo dan aktivitas dari Supabase Arus (opsional) |
 | `public/index.html` | Kerangka halaman dan gaya tampilan |
 | `public/js/` | Modul tanpa build step: `api.js`, `dashboard.js`, `office.js`, `scene.js`, `characters.js`, `behaviors.js`, `navgrid.js` |
 | `local-server.mjs` | Menjalankan semuanya di komputer sendiri |
