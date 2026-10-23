@@ -9,7 +9,7 @@ Dashboard task dan kantor 3D yang hidup, di lantai 38 sebuah gedung. Anda mengel
 | Irham, Fariz | Engineer | Mengerjakan task, dibagi rata berdasarkan beban kerja |
 | Nadia | Designer | Otomatis mengambil task berlabel desain |
 
-Nama, peran, warna baju, dan jam kerja diatur di satu file: `lib/team.js`.
+Nama, peran, warna baju, kebiasaan saat rehat, dan jam kerja diatur di satu file: `lib/team.js`.
 
 ## Alur kerja
 
@@ -22,6 +22,7 @@ Done             ──▶ penanggung jawab membawa laptop ke ruang meeting, Rai
 
 - Task yang ditarik ke Done tampil dulu dengan badge **Presenting to Manager**. Server yang memutuskan kapan task selesai, jadi urutannya sama di semua perangkat.
 - Kalau banyak perubahan datang bersamaan, setiap karyawan punya antrean aksi sendiri, sehingga animasinya tidak bertabrakan. Dashboard tetap langsung terupdate.
+- Saat mengerjakan task, monitor engineer menampilkan editor kode yang diketik huruf demi huruf, lengkap dengan warna sintaks. Setelah satu file selesai, terminal menjalankan tes atau build. Sesekali mereka rehat sebentar, misalnya ambil kopi atau air minum, menelepon sambil mondar-mandir, peregangan, atau diskusi di meja rekan. Yang punya kebiasaan `merokok` (atur di `habits` pada `lib/team.js`) pergi ke ruang merokok. Status task tetap On Progress selama rehat.
 - Saat tidak memegang task, karyawan ngopi (antre di mesin kopi), santai di sofa, ngobrol berdua di dekat jendela, melihat pemandangan kota, main ping-pong, peregangan, atau rapat singkat di papan. Raihan sesekali berkeliling.
 - Jam kerja 08.00–17.00. Setelahnya, yang tidak memegang task pulang lewat lift, sementara yang masih memegang task lembur. Pagi hari mereka datang dari lift. Task baru di malam hari memanggil orangnya kembali.
 - Langit, matahari, dan lampu kota mengikuti jam di perangkat yang membuka halaman.

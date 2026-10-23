@@ -37,9 +37,9 @@ export class Agent {
   setStatus(s) { this.status = s; }
   isFree() { return !this.away && (!this.script || this.script.kind === 'idle') && this.queue.length === 0; }
 
-  // tambahkan skrip; skrip task/duty menyela aktivitas idle atau kerja rutin
+  // tambahkan skrip; skrip task/duty menyela aktivitas idle, kerja rutin, atau rehat sejenak
   enqueue(script, { front = false } = {}) {
-    if (script.kind !== 'idle' && this.script && (this.script.kind === 'idle' || this.script.kind === 'work')) this.abort();
+    if (script.kind !== 'idle' && this.script && (this.script.kind === 'idle' || this.script.kind === 'work' || this.script.kind === 'break')) this.abort();
     if (front) this.queue.unshift(script); else this.queue.push(script);
   }
   abort() {

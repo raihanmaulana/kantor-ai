@@ -167,7 +167,7 @@ export function initOffice({ stage, onSelectEmployee }) {
       if (!shouldBeHere(a)) { a.away = true; a.ch.setVisible(false); a.ch.sitting = false; a.ch.seat = null; }
       a.setStatus(a.away ? 'Sudah pulang' : '');
       // jeda awal acak supaya tidak semua orang langsung ngopi bersamaan
-      Object.assign(a.cooldown, { coffee: rand(60, 260), sofa: rand(40, 200), window: rand(30, 160), stretch: rand(30, 120), chat: rand(60, 200), pingpong: rand(90, 300), huddle: rand(120, 400), tidyBoard: rand(60, 200), patrol: rand(90, 240) });
+      Object.assign(a.cooldown, { workBreak: rand(40, 160), coffee: rand(60, 260), sofa: rand(40, 200), window: rand(30, 160), stretch: rand(30, 120), chat: rand(60, 200), pingpong: rand(90, 300), huddle: rand(120, 400), tidyBoard: rand(60, 200), patrol: rand(90, 240) });
     }
     renderer.shadowMap.needsUpdate = true;
   }
@@ -184,15 +184,74 @@ export function initOffice({ stage, onSelectEmployee }) {
     if (!shouldBeHere(a)) return goHomeScript(a);
     const wt = workTaskOf(a);
     if (wt) {
-      if (!(a.cooldown.workCoffee > simT) && Math.random() < 0.12) {
-        a.cooldown.workCoffee = simT + 420;
-        const c = coffeeScript(a, O); if (c) { c.status = 'Istirahat sebentar: ambil kopi'; return c; }
+      if (!(a.cooldown.workBreak > simT) && Math.random() < 0.3) {
+        const b = workBreak(a);
+        if (b) { a.cooldown.workBreak = simT + rand(150, 300); return b; }
       }
       return { kind: 'work', name: 'work', status: 'Mengerjakan: ' + short(wt.title), steps: [S.sit(O.seatOf(a)), S.act(a.role === 'designer' && Math.random() < 0.5 ? 'think' : 'type', { dur: rand(20, 45), status: 'Mengerjakan: ' + short(wt.title) })] };
     }
     const wait = waitingTaskOf(a);
     if (wait) return { kind: 'work', name: 'waiting', status: 'Menunggu persetujuan Anda', steps: [S.sit(O.seatOf(a)), S.act('sit', { dur: 20, status: 'Menunggu persetujuan Anda: ' + short(wait.title, 28) })] };
     return chooseIdle(a, O, simT) || { kind: 'idle', name: 'desk', status: 'Di meja', steps: [S.sit(O.seatOf(a)), S.act('sit', { dur: rand(10, 20) })] };
+  }
+
+  /* ---------- rehat sejenak saat task masih On Progress ---------- */
+  // Status task tidak berubah; ini hanya jeda singkat sebelum kembali mengetik.
+  function workBreak(a) {
+    const P = world.POI, habits = a.emp.habits || [], opts = [];
+    const add = (name, w, cd, make) => { if (!(a.cooldown['wb_' + name] > simT)) opts.push({ name, w, cd, make }); };
+    if (habits.includes('merokok')) add('smoke', 3, 260, () => smokeScript(a));
+    add('coffee', 2, 360, () => { const c = coffeeScript(a, O); if (c) { c.kind = 'break'; c.status = 'Rehat sebentar: ambil kopi'; } return c; });
+    add('phone', 1.2, 300, () => phoneScript(a));
+    add('water', 1, 240, () => ({ kind: 'break', name: 'water', status: 'Ambil air minum', steps: [
+      S.walk(P.water), S.face(P.water.rot), S.act('brew', { dur: 2.2, status: 'Ambil air minum' }), S.call((ag) => ag.ch.props({ mug: true })),
+      S.act('drink', { dur: rand(3, 5), props: { mug: true }, status: 'Minum air' }) ] }));
+    add('stretch', 1, 200, () => ({ kind: 'break', name: 'stretch', status: 'Peregangan sebentar', steps: [
+      S.stand(), S.face(a.desk.seat.rot), S.act('stretch', { dur: rand(5, 8), status: 'Peregangan sebentar' }) ] }));
+    const mates = agents.filter((x) => x !== a && !x.away && x.role !== 'manager' && x.ch.sitting && x.ch.seat && x.ch.seat.desk === x.desk);
+    if (mates.length) add('discuss', 1, 300, () => {
+      const m = mates[(Math.random() * mates.length) | 0], sp = { x: m.desk.seat.x + 0.95, z: m.desk.seat.z + (m.desk.face === 's' ? -0.25 : 0.25) };
+      return { kind: 'break', name: 'discuss', status: 'Diskusi dengan ' + m.emp.name, steps: [
+        S.walk(sp), S.faceTo(m.ch.pos), S.act('talk', { dur: rand(8, 13), lookAt: m.ch.pos, status: 'Diskusi dengan ' + m.emp.name }) ] };
+    });
+    let total = opts.reduce((t, o) => t + o.w, 0);
+    while (opts.length) {
+      let r = Math.random() * total, c = opts[0];
+      for (const o of opts) if ((r -= o.w) <= 0) { c = o; break; }
+      const sc = c.make();
+      if (sc) { a.cooldown['wb_' + c.name] = simT + c.cd; return sc; }
+      total -= c.w; opts.splice(opts.indexOf(c), 1);
+    }
+    return null;
+  }
+  const v3 = new THREE.Vector3();
+  function smokeScript(a) {
+    const P = world.POI, ash = world.smokeRoom.ash;
+    const k = P.smoke.findIndex((_, i) => a.reserve('smk' + i)); if (k < 0) return null;
+    const spot = P.smoke[k];
+    let wisp = 0, puffing = 0;
+    return { kind: 'break', name: 'smoke', status: 'Rehat merokok sebentar', steps: [
+      S.walk(spot), S.faceTo(ash), S.call((ag) => ag.ch.props({ cig: true })),
+      S.act('smoke', { dur: rand(22, 34), props: { cig: true }, status: 'Merokok di ruang merokok',
+        onTick: (ag, dt) => {
+          if ((wisp -= dt) <= 0) { wisp = 0.45; ag.ch.R.cigTip.getWorldPosition(v3); world.puff(v3.x, v3.y + 0.02, v3.z); }
+          if (ag.ch.exhaleT > 0.9 && (puffing -= dt) <= 0) { puffing = 0.12; ag.ch.R.mouth.getWorldPosition(v3); world.puff(v3.x + Math.sin(ag.ch.rot) * 0.08, v3.y, v3.z + Math.cos(ag.ch.rot) * 0.08, true); }
+        } }),
+      S.faceTo(ash), S.act('take', { dur: 1.0 }), S.call((ag) => ag.ch.props({})),
+    ] };
+  }
+  function phoneScript(a) {
+    const pairs = world.POI.phone;
+    const k = pairs.findIndex((_, i) => a.reserve('ph' + i)); if (k < 0) return null;
+    const [A, B] = pairs[k], who = ['klien', 'vendor', 'tim lain', 'keluarga'][(Math.random() * 4) | 0];
+    const st = 'Menelepon ' + who;
+    return { kind: 'break', name: 'phone', status: st, steps: [
+      S.call((ag) => ag.ch.props({ phone: true })),
+      S.walk(A), S.face(A.rot), S.act('phone', { dur: rand(5, 8), props: { phone: true }, status: st }),
+      S.walk(B), S.face(B.rot), S.act('phone', { dur: rand(4, 7), props: { phone: true } }),
+      S.walk(A), S.face(A.rot), S.act('phone', { dur: rand(3, 5), props: { phone: true } }),
+      S.call((ag) => ag.ch.props({})),
+    ] };
   }
 
   function arriveScript(a) {
@@ -348,6 +407,14 @@ export function initOffice({ stage, onSelectEmployee }) {
     const atDesk = a.ch.sitting && a.ch.seat && a.ch.seat.desk === d && !a.away;
     g.fillStyle = '#0b0e17'; g.fillRect(0, 0, w, h);
     if (a.away) { d.tex.needsUpdate = true; return; }
+    if (!atDesk && a.role !== 'manager' && a.role !== 'designer' && workTaskOf(a)) {
+      // sedang rehat: editor tetap terbuka, kursor berhenti
+      g.fillStyle = '#1d2335'; g.fillRect(0, 0, w, 16);
+      drawCode(g, a, workTaskOf(a), false);
+      g.fillStyle = 'rgba(11,14,23,.55)'; g.fillRect(0, 16, w, h - 16);
+      g.fillStyle = '#e6e8ef'; g.font = '700 13px sans-serif'; g.fillText('Rehat sebentar…', 78, 88);
+      d.tex.needsUpdate = true; return;
+    }
     if (!atDesk) {
       const px = w / 2 + Math.sin(a.ch.t * 0.7) * 70, py = h / 2 + Math.cos(a.ch.t * 0.9) * 40;
       g.fillStyle = ac; g.globalAlpha = 0.5; g.beginPath(); g.arc(px, py, 10, 0, Math.PI * 2); g.fill(); g.globalAlpha = 1;
@@ -370,20 +437,103 @@ export function initOffice({ stage, onSelectEmployee }) {
         g.fillStyle = ac; g.globalAlpha = 0.85; g.fillRect(30, 36, 196 * Math.min(1, p * 1.4), 40); g.globalAlpha = 1;
         g.fillStyle = '#ffd166'; g.beginPath(); g.arc(70, 110, 16, 0, Math.PI * 2); g.fill();
         g.fillStyle = '#e6e8ef'; g.fillRect(100, 98, 110 * Math.min(1, p * 2), 8); g.fillRect(100, 114, 80 * Math.min(1, p * 2.3), 6);
-      } else {
-        const lines = 9, off = Math.floor(a.ch.t * 2.2);
-        for (let i = 0; i < lines; i++) {
-          const k = (i + off) % 17, len = 40 + ((k * 53) % 150), ind = (k % 4) * 10;
-          g.fillStyle = k % 5 === 0 ? '#ffd166' : k % 3 === 0 ? ac : '#7d859c';
-          g.fillRect(14 + ind, 28 + i * 13, Math.min(len, w - 30 - ind) * (i === lines - 1 ? (a.ch.t * 3 % 1) : 1), 4);
-        }
-      }
+      } else drawCode(g, a, wt, true);
     } else {
       g.fillStyle = ac; g.globalAlpha = 0.16; g.fillRect(18, 30, w - 36, h - 46); g.globalAlpha = 1;
       g.fillStyle = '#e6e8ef'; g.font = '700 15px sans-serif'; g.fillText(waitingTaskOf(a) ? 'Menunggu persetujuan' : 'Siap menerima tugas', 32, 78);
       g.fillStyle = '#8a92a8'; g.font = '500 11px sans-serif'; g.fillText(a.emp.title, 32, 98);
     }
     d.tex.needsUpdate = true;
+  }
+
+  /* ---------- layar kode engineer ---------- */
+  const CODE = [
+    { file: 'api/handler.js', lang: 'js', test: ['$ npm test', '✓ 18 tes lulus (1.2 dtk)'], lines: [
+      "import { db } from '../lib/db.js';", "import { kirimNotif } from '../lib/notif.js';", '',
+      'export default async function handler(req, res) {', '  const { id } = req.query;',
+      "  if (!id) return res.status(400).json({ error: 'id wajib' });", '', '  const data = await db.get(`order:${id}`);',
+      '  const aktif = data.items.filter((x) => x.aktif);', '  let total = 0;', '  for (const item of aktif) {',
+      '    total += item.qty * item.harga;', '  }', '  data.total = Math.round(total * 1.11);', "  data.status = 'diproses';",
+      '  await db.set(`order:${id}`, data);', '  await kirimNotif(data.email, total);', '  return res.json({ ok: true, total });', '}'] },
+    { file: 'laporan.py', lang: 'py', test: ['$ pytest -q', '✓ 9 passed in 0.84s'], lines: [
+      'import pandas as pd', 'from datetime import date', '', '# rekap penjualan per minggu', 'def rekap(path):',
+      '    df = pd.read_csv(path, parse_dates=["tanggal"])', '    df = df[df["status"] == "lunas"]',
+      '    df["minggu"] = df["tanggal"].dt.isocalendar().week', '    hasil = df.groupby("minggu")["total"].sum()',
+      '    return hasil.reset_index()', '', 'def simpan(hasil):', '    nama = f"rekap-{date.today()}.xlsx"',
+      '    hasil.to_excel(nama, index=False)', '    print("tersimpan:", nama)', '', 'if __name__ == "__main__":',
+      '    simpan(rekap("data/penjualan.csv"))'] },
+    { file: 'src/Dashboard.jsx', lang: 'js', test: ['$ npm run build', '✓ build selesai dalam 3.4 dtk'], lines: [
+      "import { useEffect, useState } from 'react';", "import { ambilData } from './api';", '',
+      'export function Dashboard({ userId }) {', '  const [rows, setRows] = useState([]);', '  const [loading, setLoading] = useState(true);', '',
+      '  useEffect(() => {', '    ambilData(userId)', '      .then(setRows)', '      .finally(() => setLoading(false));', '  }, [userId]);', '',
+      '  if (loading) return <Spinner />;', '  return (', '    <Tabel data={rows} kolom={["Nama", "Status", "Total"]} />', '  );', '}'] },
+    { file: 'migrasi.sql', lang: 'sql', test: ['$ npm run migrate', '✓ 3 migrasi diterapkan'], lines: [
+      '-- tabel pelanggan baru', 'CREATE TABLE pelanggan (', '  id SERIAL PRIMARY KEY,', '  nama TEXT NOT NULL,',
+      '  email TEXT UNIQUE,', '  dibuat TIMESTAMP DEFAULT now()', ');', '', 'CREATE INDEX idx_email ON pelanggan (email);', '',
+      'SELECT p.nama, COUNT(o.id) AS jumlah', 'FROM pelanggan p', 'JOIN orders o ON o.pelanggan_id = p.id',
+      "WHERE o.status = 'lunas'", 'GROUP BY p.nama', 'ORDER BY jumlah DESC', 'LIMIT 10;'] },
+  ];
+  const KW = new Set(['import', 'from', 'export', 'default', 'async', 'function', 'const', 'let', 'return', 'if', 'for', 'of', 'await', 'def', 'in', 'print', 'SELECT', 'FROM', 'WHERE', 'JOIN', 'ON', 'GROUP', 'BY', 'ORDER', 'LIMIT', 'CREATE', 'TABLE', 'INDEX', 'AS', 'DESC', 'NOT', 'NULL', 'PRIMARY', 'KEY', 'UNIQUE', 'DEFAULT', 'TEXT', 'SERIAL', 'TIMESTAMP', 'COUNT']);
+  const TOK = /(\/\/.*|--.*|#.*)|('[^']*'?|"[^"]*"?|`[^`]*`?)|(\b\d+(?:\.\d+)?\b)|([A-Za-z_]\w*)|(\s+)|(.)/g;
+  const hashStr = (t) => { let h = 7; for (const c of String(t)) h = (h * 31 + c.charCodeAt(0)) >>> 0; return h; };
+  function codeState(a, wt) {
+    let c = a.code;
+    if (!c || c.taskId !== wt.id) {
+      const k = (hashStr(wt.id) + (a.role === 'engineer' ? hashStr(a.id) : 0)) % CODE.length;
+      c = a.code = { taskId: wt.id, k, li: 0, chars: 0, done: [], last: simT, term: 0 };
+    }
+    return c;
+  }
+  function stepCode(c, typing, dt) {
+    const src = CODE[c.k];
+    if (c.term > 0) { c.term -= dt; if (c.term <= 0) { c.k = (c.k + 1) % CODE.length; c.li = 0; c.chars = 0; c.done = []; } return; }
+    if (!typing) return;
+    c.chars += dt * (11 + Math.random() * 8);
+    while (c.li < src.lines.length && c.chars >= src.lines[c.li].length) {
+      c.chars -= Math.max(src.lines[c.li].length, 0); c.done.push(src.lines[c.li]); c.li++;
+      if (!src.lines[c.li - 1]) c.chars = 0;
+    }
+    if (c.li >= src.lines.length) c.term = 5;
+  }
+  function drawLine(g, text, x, y, maxX, lang) {
+    TOK.lastIndex = 0; let m;
+    while ((m = TOK.exec(text)) && x < maxX) {
+      const t = m[0];
+      if (m[1] && (lang !== 'py' || t.startsWith('#')) && (lang === 'sql' ? t.startsWith('--') : !t.startsWith('--'))) g.fillStyle = '#7d8799';
+      else if (m[2]) g.fillStyle = '#a5d6ff';
+      else if (m[3]) g.fillStyle = '#79c0ff';
+      else if (m[4]) g.fillStyle = KW.has(t) ? '#ff7b72' : text[TOK.lastIndex] === '(' ? '#d2a8ff' : '#e6edf3';
+      else g.fillStyle = '#c9d1d9';
+      if (!m[5]) g.fillText(t, x, y);
+      x += g.measureText(t).width;
+    }
+    return x;
+  }
+  function drawCode(g, a, wt, live) {
+    const w = 256, h = 160, c = codeState(a, wt), src = CODE[c.k];
+    const dt = Math.min(1, simT - c.last); c.last = simT;
+    if (live) stepCode(c, a.ch.act === 'type' && a.ch.burst > 0, dt);
+    g.fillStyle = '#141a26'; g.fillRect(0, 16, w, h - 16);
+    g.fillStyle = '#161b26'; g.fillRect(44, 0, 96, 16);
+    g.fillStyle = '#c9d1d9'; g.font = '600 9px sans-serif'; g.fillText(src.file, 50, 11);
+    g.fillStyle = '#5b6276'; g.fillText(short(wt.title, 18), 148, 11);
+    g.font = '600 12px ui-monospace, Menlo, Consolas, monospace';
+    const LH = 14, termH = c.term > 0 ? 38 : 0, rows = Math.floor((h - 20 - termH) / LH);
+    const cur = c.li < src.lines.length && c.term <= 0 ? src.lines[c.li].slice(0, Math.floor(c.chars)) : null;
+    const all = cur === null ? c.done : [...c.done, cur];
+    const start = Math.max(0, all.length - rows);
+    let endX = 26;
+    for (let i = start; i < all.length; i++) {
+      const y = 30 + (i - start) * LH;
+      g.fillStyle = '#4a5268'; g.fillText(String(i + 1).padStart(2, ' '), 3, y);
+      endX = drawLine(g, all[i], 26, y, w - 4, src.lang);
+    }
+    if (cur !== null && (a.ch.burst > 0 || Math.floor(simT * 2.2) % 2 === 0)) { g.fillStyle = '#e6edf3'; g.fillRect(endX + 1, 30 + (all.length - 1 - start) * LH - 10, 7, 12); }
+    if (termH) {
+      g.fillStyle = '#0a0d14'; g.fillRect(0, h - termH, w, termH); g.fillStyle = '#262d3d'; g.fillRect(0, h - termH, w, 1);
+      g.fillStyle = '#9aa3b8'; g.fillText(src.test[0], 8, h - termH + 15);
+      if (c.term < 3.8) { g.fillStyle = '#5cc184'; g.fillText(src.test[1], 8, h - termH + 31); }
+    }
   }
 
   /* ---------- label nama ---------- */
@@ -481,6 +631,7 @@ export function initOffice({ stage, onSelectEmployee }) {
   // dipakai untuk uji otomatis: majukan simulasi tanpa menunggu frame
   window.__kantor = {
     step(sec) { for (let t = 0; t < sec; t += 0.05) { simT += 0.05; for (const a of agents) { a.update(0.05); a.ch.update(0.05, { lookAt: a.lookAt }); } world.tick(0.05); } for (const a of agents) paintMonitor(a); },
+    focus: (id, angle) => { const a = byId.get(id); if (a) { select(a); setFollow(true); zoomT = 3; if (angle != null) azT = angle; } },
     agents: () => agents.map((a) => ({ id: a.id, status: a.status, script: a.script && a.script.name, q: a.queue.map((s) => s.name).join(','), away: a.away, x: +a.ch.pos.x.toFixed(2), z: +a.ch.pos.z.toFixed(2) })),
   };
 

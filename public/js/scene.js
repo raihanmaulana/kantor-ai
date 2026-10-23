@@ -396,7 +396,7 @@ export function createWorld(scene) {
     W.desks.push(d);
     return d;
   }
-  // meja terbuka menghadap papan task
+  // meja terbuka menghadap papan task (layar monitor menghadap kamera)
   const OPEN_DESK_X = [-6.2, -3.0, 0.2, 3.4, 6.6, -9.6, 9.8];
   W.openDeskSlots = OPEN_DESK_X.map((x) => ({ x, z: -1.2 }));
   W.makeDesk = (slot, kind, accent) => desk(slot.x, slot.z, 'n', kind, accent);
@@ -445,6 +445,39 @@ export function createWorld(scene) {
   const ball = new THREE.Mesh(new THREE.SphereGeometry(0.03, 8, 6), new THREE.MeshBasicMaterial({ color: 0xffffff })); ball.visible = false; scene.add(ball);
   W.pingpongBall = ball;
 
+  /* ================= ruang merokok kaca (depan, kanan ping-pong) ================= */
+  const SR = { x0: 2.2, x1: 5.8, z0: 4.6, z1: RZ, door: 1.8 };
+  carpet(SR.x1 - SR.x0 - 0.1, SR.z1 - SR.z0 - 0.1, 0x8f9a9e, (SR.x0 + SR.x1) / 2, (SR.z0 + SR.z1) / 2);
+  glassPartition(SR.x0, SR.z0, SR.x1, SR.z0, SR.door, 1.2);
+  glassPartition(SR.x0, SR.z0, SR.x0, SR.z1, null);
+  glassPartition(SR.x1, SR.z0, SR.x1, SR.z1, null);
+  // papan nama gantung dua sisi di atas pintu
+  const srPlate = plateTex('RUANG MEROKOK');
+  [0, Math.PI].forEach((r) => { const m = mesh(new THREE.PlaneGeometry(0.8, 0.2), new THREE.MeshBasicMaterial({ map: srPlate, toneMapped: false }), SR.x0 + SR.door, 3.02, SR.z0 + (r ? 0.012 : -0.012), null, false); m.rotation.y = r ? 0 : Math.PI; });
+  // asbak berdiri, bangku, kipas penyedot asap
+  const ASH = { x: (SR.x0 + SR.x1) / 2, z: 6.75 };
+  cyl(0.16, 0.2, 0.04, M(0x2d3242), ASH.x, 0.02, ASH.z, 16); cyl(0.05, 0.05, 0.85, M(0x9aa0ad, { metalness: 0.6, roughness: 0.35 }), ASH.x, 0.45, ASH.z, 10);
+  cyl(0.2, 0.15, 0.1, M(0x9aa0ad, { metalness: 0.6, roughness: 0.35 }), ASH.x, 0.92, ASH.z, 18); cyl(0.17, 0.17, 0.01, M(0x5b5f68), ASH.x, 0.97, ASH.z, 18);
+  nav.circle(ASH.x, ASH.z, 0.22);
+  rbox(1.7, 0.08, 0.42, 0.06, M(0x6f533c), SR.x1 - 0.35, 0.44, 6.6).rotation.y = Math.PI / 2;
+  [-0.65, 0.65].forEach((dz) => box(0.36, 0.42, 0.06, M(0x2d3242), SR.x1 - 0.35, 0.21, 6.6 + dz));
+  nav.box(SR.x1 - 0.35, 6.6, 0.42, 1.7, 0.1);
+  cyl(0.3, 0.3, 0.08, M(0xd7dae2), ASH.x, 3.25, ASH.z, 20).castShadow = false;
+  const fan = new THREE.Group(); fan.position.set(ASH.x, 3.19, ASH.z); scene.add(fan);
+  for (let i = 0; i < 4; i++) { const b = box(0.24, 0.01, 0.07, M(0x8a90a0), Math.cos(i * TAU / 4) * 0.13, 0, Math.sin(i * TAU / 4) * 0.13, fan); b.rotation.y = -i * TAU / 4; b.castShadow = false; }
+
+  // asap rokok: partikel kecil yang naik, melebar, lalu memudar
+  const puffGeo = new THREE.SphereGeometry(0.05, 7, 5);
+  const puffs = [];
+  W.puff = (x, y, z, big = false) => {
+    if (puffs.length > 60) return;
+    const m = new THREE.Mesh(puffGeo, new THREE.MeshBasicMaterial({ color: 0xdfe3e8, transparent: true, opacity: big ? 0.5 : 0.32, depthWrite: false }));
+    m.position.set(x, y, z); m.castShadow = false;
+    m.userData = { life: big ? 2.6 : 1.8, max: big ? 2.6 : 1.8, v: new THREE.Vector3((Math.random() - 0.5) * 0.12, big ? 0.32 : 0.22, (Math.random() - 0.5) * 0.12), grow: big ? 2.6 : 1.5, o: m.material.opacity };
+    scene.add(m); puffs.push(m);
+  };
+  W.smokeRoom = { ...SR, ash: ASH };
+
   /* ================= tanaman ================= */
   const plant = (x, z, s) => {
     cyl(0.22 * s, 0.16 * s, 0.42 * s, M(0xd6c4ab), x, 0.21 * s, z, 14);
@@ -454,7 +487,7 @@ export function createWorld(scene) {
       f.position.set(x + dx * s, dy * s, z + dz * s); f.castShadow = true; scene.add(f); });
     nav.circle(x, z, 0.25 * s);
   };
-  plant(-13.3, -2.6, 1.2); plant(-13.3, 7.3, 1.2); plant(3.0, -7.4, 1.0); plant(-7.8, -7.4, 1.0); plant(9.4, -7.4, 0.9); plant(13.4, -3.6, 1.1); plant(-6.0, 7.4, 1.0); plant(6.2, 7.3, 0.9); plant(13.4, 3.0, 1.1); plant(-13.4, -7.4, 0.9);
+  plant(-13.3, -2.6, 1.2); plant(-13.3, 7.3, 1.2); plant(3.0, -7.4, 1.0); plant(-7.8, -7.4, 1.0); plant(9.4, -7.4, 0.9); plant(13.4, -3.6, 1.1); plant(-6.0, 7.4, 1.0); plant(6.2, 7.3, 0.9); plant(13.4, 3.0, 1.1); plant(-13.4, -7.4, 0.9); plant(2.6, RZ - 0.45, 0.8);
 
   /* ================= lampu ruangan malam ================= */
   pendant(MTC.x, MTC.z, 2.9); pendant(SOFA.x, 5.6); pendant(10.6, 5.6); pendant(-11.4, -5.6);
@@ -476,6 +509,9 @@ export function createWorld(scene) {
     windowSolo: [P(-13.2, 1.8, -Math.PI / 2), P(-13.2, 3.0, -Math.PI / 2), P(1.8, -7.3, Math.PI), P(-6.4, -7.3, Math.PI)],
     pingpong: [P(PP.x - 1.75, PP.z, Math.PI / 2), P(PP.x + 1.75, PP.z, -Math.PI / 2)],
     stretch: [P(5.6, 3.0, 0.4), P(7.4, 2.6, -0.3), P(-5.2, 3.2, 0.2)],
+    smoke: [P(ASH.x - 0.62, ASH.z - 0.3), P(ASH.x + 0.45, ASH.z - 0.55), P(ASH.x - 0.35, ASH.z + 0.65)],
+    phone: [[P(-11.0, 2.4, 0.2), P(-9.4, 2.7, -0.2)], [P(13.2, 1.2, Math.PI / 2), P(13.2, -0.2, Math.PI / 2)], [P(-6.6, 3.1, 0.3), P(-5.0, 3.4, 0.3)], [P(12.4, -5.6, Math.PI), P(11.2, -5.8, Math.PI)]],
+    water: P(7.8, 6.85, 0),
     liftCall: P(12.1, -6.4, Math.PI),
   };
   W.MT = MT; W.MR = MR;
@@ -513,7 +549,14 @@ export function createWorld(scene) {
       u.life -= dt; m.material.opacity = Math.min(1, u.life);
       if (u.life <= 0) { scene.remove(m); m.material.dispose(); confetti.splice(i, 1); }
     }
-    return lifts.some((l) => Math.abs(l.target - l.open) > 0.01) || confetti.length > 0;
+    fan.rotation.y += dt * 9;
+    for (let i = puffs.length - 1; i >= 0; i--) {
+      const m = puffs[i], u = m.userData;
+      u.life -= dt; m.position.addScaledVector(u.v, dt); u.v.x *= 1 - dt * 0.5; u.v.z *= 1 - dt * 0.5;
+      const k = 1 - u.life / u.max; m.scale.setScalar(1 + k * u.grow); m.material.opacity = u.o * Math.min(1, u.life / u.max * 1.6);
+      if (u.life <= 0) { scene.remove(m); m.material.dispose(); puffs.splice(i, 1); }
+    }
+    return lifts.some((l) => Math.abs(l.target - l.open) > 0.01) || confetti.length > 0 || puffs.length > 0;
   };
 
   W.setPendants = (on) => bulbMats.forEach((m) => m.color.setHex(on ? 0xffe2a8 : 0xf4efe4));

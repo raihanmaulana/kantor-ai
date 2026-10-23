@@ -94,6 +94,10 @@ function buildBody(look) {
   R.marker = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, 0.13, 6), M('#2d6cdf')); R.marker.position.set(0, -0.04, 0.05); R.marker.rotation.x = 1.2; R.marker.visible = false; R.handR.add(R.marker);
   R.paddle = new THREE.Group(); R.paddle.visible = false; R.handR.add(R.paddle);
   const pdl = new THREE.Mesh(new THREE.CylinderGeometry(0.075, 0.075, 0.015, 14), M('#c0392b')); pdl.rotation.x = Math.PI / 2; pdl.position.set(0, -0.1, 0.03); R.paddle.add(pdl);
+  R.cig = new THREE.Group(); R.cig.visible = false; R.handR.add(R.cig);
+  const cg = new THREE.Mesh(new THREE.CylinderGeometry(0.009, 0.009, 0.085, 6), M('#f4f1ea')); cg.rotation.z = Math.PI / 2; cg.position.set(0.05, -0.03, 0.03); R.cig.add(cg);
+  R.cigTip = new THREE.Mesh(new THREE.SphereGeometry(0.011, 6, 4), new THREE.MeshBasicMaterial({ color: 0xff7a2f })); R.cigTip.position.set(0.095, -0.03, 0.03); R.cig.add(R.cigTip);
+  R.phone = new THREE.Mesh(new THREE.BoxGeometry(0.055, 0.11, 0.014), M('#15171f')); R.phone.position.set(-0.02, -0.06, 0.03); R.phone.visible = false; R.handR.add(R.phone);
   g.traverse((o) => { if (o.isMesh) o.castShadow = true; });
   return R;
 }
@@ -122,8 +126,9 @@ export class Character {
   setVisible(v) { this.visible = v; this.group.visible = v; this.blob.visible = v; }
   place(x, z, rot = 0) { this.pos.set(x, 0, z); this.rot = this.rotTarget = rot; this.curve = null; this.tween = null; }
   setAct(name) { if (this.act !== name) { this.act = name; this.actT = 0; } }
-  props({ mug = false, paper = false, laptop = false, marker = false, paddle = false } = {}) {
+  props({ mug = false, paper = false, laptop = false, marker = false, paddle = false, cig = false, phone = false } = {}) {
     this.R.mug.visible = mug; this.R.paper.visible = paper; this.R.laptop.visible = laptop; this.R.marker.visible = marker; this.R.paddle.visible = paddle;
+    this.R.cig.visible = cig; this.R.phone.visible = phone;
   }
   cheer() { this.cheerT = 1.8; }
   wave() { this.waveT = 2.0; }
@@ -207,6 +212,8 @@ export class Character {
       if (this.curve) { const ahead = this.curve.getTangentAt(Math.min(1, (this.s + 0.6) / this.curveLen)); P.headY += clamp(angDiff(this.rot, Math.atan2(ahead.x, ahead.z)), -0.7, 0.7) * 0.8; }
       if (R.paper.visible || R.laptop.visible) { P.shL = P.shR = -0.6; P.elL = P.elR = -1.2; P.shLz = 0.05; P.shRz = -0.05; }
       if (R.mug.visible) { P.shR = -0.5; P.elR = -1.4; }
+      if (R.phone.visible) { P.shR = -0.95; P.shRz = -0.5; P.elR = -2.35; P.headZ = 0.12; }
+      if (R.cig.visible) { P.shR = -0.25; P.elR = -0.9; }
     } else if (sitting) {
       P.hipL = P.hipR = -1.52; P.kneeL = P.kneeR = 1.45; P.ankleL = P.ankleR = 0.1; P.rootY = -0.075;
       if (a === 'sitdown') { kMode = STIFF.slow; P.lean = 0.3; P.shL = P.shR = -0.3; P.elL = P.elR = -0.6; }
@@ -271,6 +278,22 @@ export class Character {
         const sw = Math.sin(this.t * 4.2 + (ctx.side || 0) * Math.PI);
         P.shR = -0.7 + sw * 0.6; P.shRz = -0.5 + sw * 0.3; P.elR = -1.0; P.lean = 0.2; P.kneeL = P.kneeR = 0.35; P.hipL = P.hipR = -0.35; P.twist = sw * 0.25;
         p.x += Math.sin(this.t * 1.7 + this.seed) * 0.15 * dt * Math.cos(this.rot);
+      } else if (a === 'smoke') {
+        // isap (tangan ke mulut) → turunkan → hembuskan asap sambil menengadah sedikit
+        this.sipT -= dt; if (this.sipT < -1.3) { this.sipT = 3.5 + Math.random() * 3; this.exhaleT = 1.6; }
+        const sip = this.sipT < 0 ? Math.sin(clamp(-this.sipT / 1.3, 0, 1) * Math.PI) : 0;
+        this.exhaleT = Math.max(0, (this.exhaleT || 0) - dt);
+        P.shR = -0.3 - 1.05 * sip; P.shRz = -0.12 - 0.1 * sip; P.elR = -1.0 - 1.25 * sip;
+        P.shL = -0.35; P.elL = -1.25; P.shLz = 0.35;                       // tangan kiri terlipat di depan perut
+        P.headX = -0.06 * sip - (this.exhaleT > 0 ? 0.22 * Math.sin(this.exhaleT / 1.6 * Math.PI) : 0);
+        P.headY += Math.sin(this.t * 0.35 + this.seed) * 0.45 * (1 - sip); P.lean = -0.03;
+        P.hipL = 0.08; P.kneeL = 0.12; P.sway = 0.03;                       // bertumpu pada satu kaki
+      } else if (a === 'phone') {
+        const talking = Math.sin(this.t * 0.8 + this.seed * 2) > -0.2;
+        P.shR = -0.95; P.shRz = -0.5; P.elR = -2.35; P.headZ = 0.14;
+        if (talking) { P.shL = -0.35 + Math.sin(this.t * 2.7) * 0.25; P.elL = -0.9 + Math.sin(this.t * 3.3) * 0.3; P.shLz = 0.2; P.headX = Math.sin(this.t * 3.1) * 0.05; }
+        else { P.shL = -0.1; P.elL = -0.5; P.headX = 0.12; const nod = Math.max(0, Math.sin(this.t * 2.3)); P.headX += nod * nod * 0.12; }
+        P.headY += Math.sin(this.t * 0.4 + this.seed) * 0.35; P.sway = Math.sin(this.t * 0.6) * 0.03;
       } else if (a === 'listenStand') {
         P.shL = P.shR = -0.75; P.elL = P.elR = -1.85; P.shLz = -0.25; P.shRz = 0.25; P.lean = 0.08; P.headX = 0.12 + Math.max(0, Math.sin(this.t * 2.4)) * 0.14;
       }
