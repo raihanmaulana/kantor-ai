@@ -478,7 +478,17 @@ export function initOffice({ stage, onSelectEmployee }) {
     showVault(true);
     const fresh = j.events.filter((e) => !fin.seen.has(e.id));
     j.events.forEach((e) => fin.seen.add(e.id));
+    const prevSigs = fin.sigs, prevPockets = fin.prevPockets || [];
+    fin.sigs = j.sigs || null; fin.prevPockets = ps.map((p) => ({ id: p.id, name: p.name }));
     if (firstTime) { fin.first = false; refreshVault(); return; }
+    // perubahan tanpa catatan waktu (edit / hapus tagihan, ganti nama atau saldo awal sumber dana)
+    if (prevSigs && j.sigs) {
+      if (prevSigs.bills !== j.sigs.bills && !fresh.some((e) => e.type.startsWith('bill'))) fresh.push({ id: 'sb' + j.sigs.bills, type: 'bill-edit', label: 'Memperbarui data tagihan', amount: 0 });
+      if (prevSigs.pockets !== j.sigs.pockets && !fresh.some((e) => ['transfer', 'adjust', 'pocket-new'].includes(e.type))) {
+        const renamed = ps.find((p) => { const o = prevPockets.find((x) => x.id === p.id); return !o || o.name !== p.name; });
+        fresh.push({ id: 'sp' + j.sigs.pockets, type: 'pocket-edit', label: renamed ? 'Sumber dana: ' + renamed.name : 'Memperbarui sumber dana', amount: 0, pocketId: renamed ? renamed.id : null });
+      }
+    }
     const changed = ps.filter((p) => fin.shown.get(p.id) !== p.saldo && fin.target.get(p.id) !== p.saldo);
     changed.forEach((p) => fin.target.set(p.id, p.saldo));
     refreshVault();
@@ -486,7 +496,7 @@ export function initOffice({ stage, onSelectEmployee }) {
     const t = treasurer();
     if (!t) { changed.forEach((p) => { fin.shown.set(p.id, p.saldo); fin.target.delete(p.id); }); refreshVault(); return; }
     ensureHere(t);
-    t.enqueue(financeScript(t, fresh.reverse().slice(-4), changed));
+    t.enqueue(financeScript(t, fresh.reverse().slice(-5), changed));
   }
   function applyPocket(id) {
     const p = fin.data && fin.data.pockets.find((x) => x.id === id); if (!p) return;
@@ -494,10 +504,27 @@ export function initOffice({ stage, onSelectEmployee }) {
   }
   function financeScript(a, events, changed) {
     const steps = [S.sit(O.seatOf(a))];
-    for (const e of events) steps.push(S.call(() => (fin.current = e.id)), S.act('type', { dur: rand(2.4, 3.4), status: 'Mencatat: ' + short(e.label, 22) + ' ' + signed(e.amount) }));
+    const verb = (e) => (e.type.startsWith('bill') ? 'Tagihan · ' : e.type.startsWith('pocket') || e.type === 'transfer' || e.type === 'adjust' ? 'Sumber dana · ' : 'Mencatat: ');
+    for (const e of events) steps.push(S.call(() => (fin.current = e.id)), S.act('type', { dur: rand(2.4, 3.4), status: verb(e) + short(e.label, 26) + (e.amount ? ' ' + signed(e.amount) : '') }));
     if (!events.length) steps.push(S.act('type', { dur: 2, status: 'Mencocokkan saldo dengan Arus' }));
     steps.push(S.call(() => (fin.current = null)));
     const ps = fin.data.pockets.slice(0, 8);
+    // tagihan: bukti dimasukkan ke lemari besi
+    const billEv = events.filter((e) => e.type.startsWith('bill'));
+    if (billEv.length && world.safeFront) {
+      const sf = world.safeFront, e0 = billEv[0];
+      steps.push(
+        S.call((ag) => { ag.ch.props({ paper: true }); ag.setStatus(e0.type === 'bill-paid' ? 'Mengarsipkan bukti lunas' : 'Mengarsipkan data tagihan'); }),
+        S.walk(sf), S.face(sf.rot), S.act('take', { dur: 1.3 }),
+        S.call((ag) => { ag.ch.props({}); ag.setStatus(e0.type === 'bill-paid' ? short(e0.label, 30) + ' ✓' : 'Data tagihan diperbarui'); }),
+        S.act('stand', { dur: 0.7 }),
+      );
+    }
+    // sumber dana baru / diubah tanpa perubahan saldo: periksa alasnya di brankas
+    for (const e of events.filter((x) => (x.type === 'pocket-new' || x.type === 'pocket-edit') && x.pocketId && !changed.some((p) => p.id === x.pocketId))) {
+      const i = ps.findIndex((p) => p.id === e.pocketId), slot = world.vaultSlots[i]; if (!slot) continue;
+      steps.push(S.walk(slot.front), S.face(slot.front.rot), S.act('listenStand', { dur: 2.2, status: 'Memeriksa sumber dana ' + ps[i].name }));
+    }
     for (const p of changed) {
       const i = ps.indexOf(p), slot = world.vaultSlots[i]; if (!slot) continue;
       const delta = p.saldo - (fin.shown.get(p.id) ?? p.saldo), add = delta > 0;
@@ -524,13 +551,14 @@ export function initOffice({ stage, onSelectEmployee }) {
     const total = j.pockets.reduce((t, p) => t + p.saldo, 0);
     g.fillStyle = '#8a92a8'; g.font = '600 10px sans-serif'; g.fillText('TOTAL SALDO', 12, 32);
     g.fillStyle = '#ffd166'; g.font = '700 17px sans-serif'; g.fillText(rupiah(total), 12, 51);
-    g.fillStyle = '#8a92a8'; g.font = '500 10px sans-serif'; g.fillText('keluar bulan ini ' + rupiah(j.monthSpent || 0), 132, 32);
+    g.fillStyle = '#8a92a8'; g.font = '500 10px sans-serif'; g.fillText('keluar bln ini ' + rupiah(j.monthSpent || 0), 132, 32);
+    if (j.billsDue != null) { g.fillStyle = j.billsDue ? '#ffb27a' : '#5cc184'; g.fillText(j.billsDue ? j.billsDue + ' tagihan belum lunas' : 'tagihan beres ✓', 132, 48); }
     g.font = '600 11px sans-serif';
     j.events.slice(0, 6).forEach((e, i) => {
       const y = 72 + i * 15, hot = fin.current === e.id;
       if (hot) { g.fillStyle = 'rgba(255,209,102,.18)'; g.fillRect(6, y - 11, w - 12, 14); }
       g.fillStyle = hot ? '#ffffff' : '#c9cfdd'; g.fillText(short(e.label, 20), 12, y);
-      const s = signed(e.amount); g.fillStyle = e.amount < 0 ? '#ff8a8a' : '#5cc184'; g.fillText(s, w - 12 - g.measureText(s).width, y);
+      const s = e.amount ? signed(e.amount) : e.type === 'bill-paid' ? 'lunas' : ''; g.fillStyle = e.amount < 0 ? '#ff8a8a' : '#5cc184'; g.fillText(s, w - 12 - g.measureText(s).width, y);
     });
   }
 

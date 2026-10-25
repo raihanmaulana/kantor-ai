@@ -487,6 +487,7 @@ export function createWorld(scene) {
   const dial = cyl(0.12, 0.12, 0.05, M(0xc9ced8, { metalness: 0.8, roughness: 0.25 }), SAFE.x - 0.46, 0.72, SAFE.z, 18); dial.rotation.z = Math.PI / 2;
   box(0.03, 0.05, 0.3, M(0xc9ced8, { metalness: 0.8, roughness: 0.25 }), SAFE.x - 0.47, 0.45, SAFE.z);
   nav.box(SAFE.x, SAFE.z, 0.9, 0.75);
+  W.safeFront = { x: SAFE.x - 0.85, z: SAFE.z, rot: Math.PI / 2 };
   const vPlate = plateTex('BRANKAS');
   [0, Math.PI].forEach((r) => { const m = mesh(new THREE.PlaneGeometry(0.66, 0.16), new THREE.MeshBasicMaterial({ map: vPlate, toneMapped: false }), SAFE.x, 1.42, SAFE.z + (r ? -0.01 : 0.01), null, false); m.rotation.y = r; });
   // alas tumpukan uang: 2 kolom × 4 baris, satu per sumber dana
