@@ -271,12 +271,12 @@ export function createWorld(scene) {
   rbox(2.3, 1.3, 0.07, 0.03, M(0x1b1e27), MTC.x, 1.75, -7.6);
   mesh(new THREE.PlaneGeometry(2.2, 1.22), new THREE.MeshBasicMaterial({ map: screenTex, toneMapped: false }), MTC.x, 1.75, -7.56, null, false);
   nav.box(MTC.x, -7.55, 0.8, 0.5, 0.2);
-  W.meetingScreen = (text, sub, progress) => {
+  W.meetingScreen = (text, sub, progress, heading = 'RAPAT') => {
     const g = screenTex.userData.g, w = 512, h = 288;
     g.fillStyle = text ? '#10141f' : '#1a1f2e'; g.fillRect(0, 0, w, h);
-    if (!text) { g.fillStyle = '#39415c'; g.font = '800 34px sans-serif'; g.fillText('STUDIO KONTEN AI', 70, 150); }
+    if (!text) { g.fillStyle = '#39415c'; g.font = '800 34px sans-serif'; g.fillText('KANTOR ARUS', 140, 150); }
     else {
-      g.fillStyle = '#8e99ff'; g.font = '600 18px sans-serif'; g.fillText('PRESENTASI TASK', 28, 42);
+      g.fillStyle = heading.includes('DARURAT') ? '#ff8a80' : '#8e99ff'; g.font = '600 18px sans-serif'; g.fillText(heading, 28, 42);
       g.fillStyle = '#ffffff'; g.font = '700 30px sans-serif';
       const words = String(text).split(' '); let line = '', y = 92;
       for (const wd of words) { const tt = line ? line + ' ' + wd : wd; if (g.measureText(tt).width > 450) { g.fillText(line, 28, y); y += 38; line = wd; if (y > 170) break; } else line = tt; }
@@ -344,6 +344,13 @@ export function createWorld(scene) {
     boardTex.needsUpdate = true;
   };
   W.drawBudgetBoard(null);
+  // lampu status di atas papan: hijau (aman), kuning (waspada), merah berkedip (kritis)
+  const beaconMat = new THREE.MeshBasicMaterial({ color: 0x5cc184 });
+  cyl(0.05, 0.07, 0.08, M(0x2d3242), BOARD.x, 2.82, BOARD.z, 12);
+  const beacon = mesh(new THREE.SphereGeometry(0.1, 16, 10), beaconMat, BOARD.x, 2.94, BOARD.z, null, false);
+  const beaconLight = new THREE.PointLight(0x5cc184, 0, 4, 2); beaconLight.position.set(BOARD.x, 2.9, BOARD.z + 0.3); scene.add(beaconLight);
+  W.mood = 'aman';
+  W.setMood = (level) => { W.mood = level; const c = level === 'kritis' ? 0xff3b30 : level === 'waspada' ? 0xffb020 : 0x5cc184; beaconMat.color.setHex(c); beaconLight.color.setHex(c); };
 
   /* ================= kalender tagihan (Irham) ================= */
   const CAL = { x: -6.5, z: -6.95, w: 1.7, h: 1.25 };
@@ -689,6 +696,7 @@ export function createWorld(scene) {
       const hgt = Math.max(0.001, 0.44 * j.p); j.fill.scale.y = hgt; j.fill.position.y = hgt / 2 + 0.005;
       j.fillMat.emissive.setHex(j.done ? 0x6b4a00 : 0x000000); j.fillMat.emissiveIntensity = j.done ? 0.6 + Math.sin(performance.now() / 300) * 0.4 : 0;
     }
+    { const t = performance.now() / 1000; const on = W.mood === 'kritis' ? Math.sin(t * 6) > 0 : true; beacon.visible = on; beaconLight.intensity = W.mood === 'aman' ? 0 : on ? 0.9 : 0; }
     calAlarm.material.opacity = W.calendarAlarm ? 0.25 + Math.sin(performance.now() / 220) * 0.2 : 0;
     for (let i = puffs.length - 1; i >= 0; i--) {
       const m = puffs[i], u = m.userData;

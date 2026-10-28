@@ -240,11 +240,11 @@ export function initOffice({ stage, onSelectEmployee }) {
       S.faceTo(ash), S.act('take', { dur: 1.0 }), S.call((ag) => ag.ch.props({})),
     ] };
   }
-  function phoneScript(a) {
+  function phoneScript(a, reason) {
     const pairs = world.POI.phone;
     const k = pairs.findIndex((_, i) => a.reserve('ph' + i)); if (k < 0) return null;
-    const [A, B] = pairs[k], who = ['klien', 'vendor', 'tim lain', 'keluarga'][(Math.random() * 4) | 0];
-    const st = 'Menelepon ' + who;
+    const [A, B] = pairs[k], who = ['teman', 'keluarga', 'bank', 'toko langganan'][(Math.random() * 4) | 0];
+    const st = reason || 'Menelepon ' + who;
     return { kind: 'break', name: 'phone', status: st, steps: [
       S.call((ag) => ag.ch.props({ phone: true })),
       S.walk(A), S.face(A.rot), S.act('phone', { dur: rand(5, 8), props: { phone: true }, status: st }),
@@ -348,6 +348,7 @@ export function initOffice({ stage, onSelectEmployee }) {
   }
 
   let busyRoles = new Set();
+  O.tense = 0;
   function handleFinance(f) {
     if (!f || !f.enabled) { fin.enabled = false; fin.data = null; showVault(false); return; }
     const firstTime = fin.first;
@@ -369,6 +370,8 @@ export function initOffice({ stage, onSelectEmployee }) {
     busyRoles = new Set();
     routeEvents(fresh.reverse(), changed);
     onFinanceState(f, false);
+    const pay = fresh.find((e) => e.type === 'income'); if (pay) celebrateIncome(pay);
+    evaluateConditions();
   }
 
   // Setiap kegiatan diurus karyawan yang memegang bagiannya; pengeluaran juga dicatat Perencana Anggaran ke posnya.
@@ -510,6 +513,109 @@ export function initOffice({ stage, onSelectEmployee }) {
   function onFinanceState(f, first) {
     for (const [kind, role] of Object.entries(OBJ_ROLE)) if (first || !busyRoles.has(role) || !byRole(role)) drawObj(kind);
     if (!first && busyRoles.has('planner') === false) drawObj('board');
+  }
+  /* ---------- reaksi terhadap kondisi keuangan (bukan hanya kegiatan) ---------- */
+  const cond = { warned: new Set(), billCalls: new Set(), lastMeeting: -1e9, lastLate: -1e9, lastPanic: -1e9, evalT: 12 };
+  const pending = (a, name) => a.queue.some((x) => x.name === name) || (a.script && a.script.name === name);
+  const present = (a) => a && !a.away && !(a.script && (a.script.name === 'arrive' || a.script.name === 'home'));
+  // Satu reaksi per pemeriksaan (tiap 15 detik), dipilih menurut prioritas, supaya kantor tidak riuh sekaligus.
+  const free = (a) => present(a) && !a.queue.some((x) => x.kind === 'task') && !(a.script && a.script.kind === 'task');
+  const atDesk = (a) => a && a.ch.sitting && a.ch.seat && a.ch.seat.desk === a.desk;
+  function evaluateConditions() {
+    const f = finNow();
+    if (!f) { world.setMood('aman'); O.tense = 0; return; }
+    const lv = f.status.level, ym = f.today.ym;
+    world.setMood(lv); O.tense = lv === 'kritis' ? 0.85 : lv === 'waspada' ? 0.5 : 0;
+    const mgr = byRole('manager'), planner = byRole('planner'), billing = byRole('billing'), aci = byRole('treasurer'), cimol = byRole('shopper');
+    const late = f.bills.filter((x) => x.status === 'terlambat');
+    const reactions = [
+      // Kritis: Raihan memanggil rapat darurat (paling sering tiap 8 menit)
+      () => {
+        if (lv !== 'kritis' || simT - cond.lastMeeting < 480 || !free(mgr)) return false;
+        const who = late.length ? billing : planner; if (!free(who)) return false;
+        cond.lastMeeting = simT; meetingScripts(mgr, who, f.status.reasons[0] || 'Kondisi keuangan kritis'); return true;
+      },
+      // tagihan terlambat: Irham melapor ke ruang Manager (tiap 5 menit)
+      () => {
+        if (!late.length || simT - cond.lastLate < 300 || !free(billing) || !free(mgr) || !atDesk(mgr)) return false;
+        cond.lastLate = simT; billing.enqueue(reportScript(billing, mgr, 'Melapor tagihan telat: ' + late.map((x) => x.name).slice(0, 2).join(', '))); return true;
+      },
+      // saldo minus: Aci panik di depan alasnya (tiap 5 menit)
+      () => {
+        const ps = vaultPockets(), neg = ps.findIndex((p) => p.saldo < 0);
+        if (neg < 0 || simT - cond.lastPanic < 300 || !free(aci)) return false;
+        cond.lastPanic = simT;
+        const slot = world.vaultSlots[neg], p = ps[neg];
+        aci.enqueue({ kind: 'task', name: 'panic', status: 'Saldo ' + p.name + ' minus!', steps: [S.walk(slot.front), S.face(slot.front.rot), S.act('panic', { dur: 3.5, status: 'Saldo ' + p.name + ' minus!' }), S.act('listenStand', { dur: 2, status: 'Perlu diisi dari sumber dana lain' })] });
+        return true;
+      },
+      // pos anggaran lewat 80% / 100%: Kartika melapor (sekali per pos per ambang per bulan)
+      () => {
+        if (!free(planner) || !free(mgr) || !atDesk(mgr)) return false;
+        for (const b of f.budget) {
+          if (b.amount <= 0 || (b.grp !== 'kebutuhan' && b.grp !== 'gaya_hidup')) continue;
+          const p = b.spent / b.amount, key = ym + b.id + (p >= 1 ? 'x' : 'w');
+          if (p < 0.8 || cond.warned.has(key)) continue;
+          cond.warned.add(key);
+          planner.enqueue(reportScript(planner, mgr, p >= 1 ? `Melapor: pos ${b.label} sudah lewat batas` : `Melapor: pos ${b.label} sudah ${Math.round(p * 100)}%`));
+          return true;
+        }
+        return false;
+      },
+      // tagihan hari ini / besok: Irham menelepon pengingat (sekali per tagihan per hari)
+      () => {
+        if (!free(billing)) return false;
+        const b = f.bills.find((x) => (x.status === 'hari_ini' || x.status === 'besok') && !cond.billCalls.has(f.today.iso + x.id)); if (!b) return false;
+        const sc = phoneScript(billing, `Pengingat: ${b.name} jatuh tempo ${b.status === 'besok' ? 'besok' : 'hari ini'}`); if (!sc) return false;
+        cond.billCalls.add(f.today.iso + b.id); billing.enqueue({ ...sc, kind: 'task' }); return true;
+      },
+      // kebutuhan yang waktunya dibeli: troli didorong ke dekat lift, dikembalikan setelah semua dibeli
+      () => {
+        const due = f.needs.some((x) => x.due), atReady = world.trolley.position.x === world.trolleyReady.x;
+        if (due === atReady || !free(cimol)) return false;
+        cimol.enqueue(trolleyScript(due)); return true;
+      },
+    ];
+    for (const r of reactions) if (r()) break;
+  }
+  function reportScript(a, mgr, text) {
+    const d = mgr.desk, spot = { x: d.x + 0.35, z: d.z + (d.face === 's' ? 1.0 : -1.0) };
+    return { kind: 'task', name: 'report', status: text, steps: [
+      S.walk(spot), { start(ag) { ag.ch.faceTo(mgr.ch.pos.x, mgr.ch.pos.z); this.t = 0; }, tick(ag, dt) { return (this.t += dt) > 0.4; } },
+      S.act('talk', { dur: 6, lookAt: mgr.ch.pos, status: text }), S.call(() => { if (!mgr.away) mgr.setStatus('Menerima laporan ' + a.emp.name); }),
+    ] };
+  }
+  function meetingScripts(mgr, who, reason) {
+    const P = world.POI, sess = { p: false, m: false, t: 0, done: false };
+    who.enqueue({ kind: 'task', name: 'meeting', status: 'Dipanggil rapat darurat', steps: [
+      S.call((ag) => ag.ch.props({ laptop: true })), S.walk(P.meetPresenter), S.faceTo(P.meetCenter), S.call((ag) => { sess.p = true; ag.ch.props({}); }),
+      S.act('present', { status: 'Rapat darurat: ' + short(reason, 30), lookAt: mgr.ch.pos, max: 40,
+        onTick: (ag, dt) => { if (sess.m) sess.t += dt; world.meetingScreen(reason, `${who.emp.name} → ${mgr.emp.name}`, sess.t / 9, 'RAPAT DARURAT'); },
+        until: () => sess.t >= 9 }),
+      S.call((ag) => { sess.done = true; world.meetingScreen(null); ag.setStatus('Rencana penghematan disepakati'); }), S.act('stand', { dur: 1.2 }),
+    ], onEnd: () => { sess.done = true; world.meetingScreen(null); } });
+    const seat = P.meetSeats[0];
+    mgr.enqueue({ kind: 'task', name: 'meeting', status: 'Memanggil rapat darurat', steps: [
+      S.sit({ seat, front: { x: seat.x, z: seat.z + 0.75 } }), S.call(() => (sess.m = true)),
+      S.act('listen', { status: 'Memimpin rapat darurat', lookAt: who.ch.pos, until: () => sess.done, max: 50 }),
+      S.call((ag) => ag.setStatus('Semua pengeluaran ditahan dulu')), S.act('sit', { dur: 1.5 }),
+    ] });
+  }
+  function trolleyScript(toReady) {
+    const T = toReady ? world.trolleyReady : world.trolleyHome;
+    const stand = toReady ? { x: T.x, z: T.z + 0.75 } : { x: T.x - 0.75, z: T.z };
+    const st = toReady ? 'Mendorong troli: waktunya belanja kebutuhan' : 'Mengembalikan troli ke pantry';
+    return { kind: 'task', name: 'trolley', status: st, steps: [
+      S.walk(trolleyFront()), S.face(trolleyFront().rot),
+      { start(ag) { this.done = false; ag.setStatus(st); ag.ch.walkTo(stand, () => (this.done = true)); },
+        tick(ag) { const r = ag.ch.rot; world.trolley.position.set(ag.ch.pos.x + Math.sin(r) * 0.75, 0, ag.ch.pos.z + Math.cos(r) * 0.75); world.trolley.rotation.y = r - Math.PI / 2; return this.done; } },
+      S.call(() => { world.trolley.position.set(T.x, 0, T.z); world.trolley.rotation.y = T.rot; renderer.shadowMap.needsUpdate = true; }),
+      S.act('stand', { dur: 0.8 }),
+    ] };
+  }
+  function celebrateIncome(e) {
+    world.confetti(0, 2.2, -1.5);
+    for (const a of agents) if (!a.away) { a.ch.cheer(); }
   }
   new MutationObserver(() => { drawObj('board'); for (const a of agents) paintMonitor(a); }).observe(document.body, { attributes: true, attributeFilter: ['class'] });
 
@@ -718,6 +824,7 @@ export function initOffice({ stage, onSelectEmployee }) {
       if (screenT <= 0) { screenT = 1 / q.screenHz; for (const a of agents) paintMonitor(a); }
     }
     skyT -= real; if (skyT <= 0) { skyT = 30; skyNow(); }
+    if (teamBuilt && dt > 0) { cond.evalT -= dt; if (cond.evalT <= 0) { cond.evalT = 15; evaluateConditions(); } }
     profileT -= real; if (profileT <= 0 && selected) { profileT = 1; onSelectEmployee && onSelectEmployee(selected.id, selected.away ? 'Sudah pulang' : selected.status); }
     if (selected) ring.position.set(selected.ch.pos.x, 0.02, selected.ch.pos.z);
     updateCamera(real);
@@ -736,7 +843,7 @@ export function initOffice({ stage, onSelectEmployee }) {
 
   // dipakai untuk uji otomatis: majukan simulasi tanpa menunggu frame
   window.__kantor = {
-    step(sec) { for (let t = 0; t < sec; t += 0.05) { simT += 0.05; for (const a of agents) { a.update(0.05); a.ch.update(0.05, { lookAt: a.lookAt }); } world.tick(0.05); } for (const a of agents) paintMonitor(a); },
+    step(sec) { for (let t = 0; t < sec; t += 0.05) { simT += 0.05; for (const a of agents) { a.update(0.05); a.ch.update(0.05, { lookAt: a.lookAt }); } world.tick(0.05); } evaluateConditions(); for (const a of agents) paintMonitor(a); },
     look: (x, z, zm, angle) => { manualTarget = { x, z }; zoomT = zm; if (angle != null) azT = angle; },
     focus: (id, angle) => { const a = byId.get(id); if (a) { select(a); setFollow(true); zoomT = 3; if (angle != null) azT = angle; } },
     agents: () => agents.map((a) => ({ id: a.id, status: a.status, script: a.script && a.script.name, q: a.queue.map((s) => s.name).join(','), away: a.away, x: +a.ch.pos.x.toFixed(2), z: +a.ch.pos.z.toFixed(2) })),

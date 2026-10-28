@@ -194,8 +194,10 @@ function huddleScript(a, others, O) {
   return make(a, 0);
 }
 
+// Saat kantor Waspada/Kritis, karyawan jarang bersantai (O.tense = 0..1).
+const LEISURE = new Set(['sofa', 'pingpong', 'window', 'chat', 'huddle']);
 export function chooseIdle(a, O, now) {
-  const opts = idleOptions(a, O).filter((o) => !(a.cooldown[o.name] > now));
+  const opts = idleOptions(a, O).filter((o) => !(a.cooldown[o.name] > now)).map((o) => (LEISURE.has(o.name) && O.tense ? { ...o, w: o.w * (1 - O.tense) } : o)).filter((o) => o.w > 0);
   let total = opts.reduce((s, o) => s + o.w, 0);
   for (let tries = 0; tries < 4 && opts.length; tries++) {
     let r = Math.random() * total, chosen = opts[0];

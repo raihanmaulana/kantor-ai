@@ -294,6 +294,10 @@ export class Character {
         if (talking) { P.shL = -0.35 + Math.sin(this.t * 2.7) * 0.25; P.elL = -0.9 + Math.sin(this.t * 3.3) * 0.3; P.shLz = 0.2; P.headX = Math.sin(this.t * 3.1) * 0.05; }
         else { P.shL = -0.1; P.elL = -0.5; P.headX = 0.12; const nod = Math.max(0, Math.sin(this.t * 2.3)); P.headX += nod * nod * 0.12; }
         P.headY += Math.sin(this.t * 0.4 + this.seed) * 0.35; P.sway = Math.sin(this.t * 0.6) * 0.03;
+      } else if (a === 'panic') {
+        // tangan memegang kepala sambil menggeleng
+        P.shL = P.shR = -2.5; P.elL = P.elR = -1.9; P.shLz = 0.55; P.shRz = -0.55;
+        P.headY = Math.sin(this.t * 7) * 0.35; P.headX = 0.1; P.lean = 0.06; P.bob += Math.abs(Math.sin(this.t * 5)) * 0.012;
       } else if (a === 'listenStand') {
         P.shL = P.shR = -0.75; P.elL = P.elR = -1.85; P.shLz = -0.25; P.shRz = 0.25; P.lean = 0.08; P.headX = 0.12 + Math.max(0, Math.sin(this.t * 2.4)) * 0.14;
       }
