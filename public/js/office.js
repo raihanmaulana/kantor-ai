@@ -5,7 +5,7 @@ import { api, LS } from './api.js';
 import { createWorld, RX, RZ } from './scene.js';
 import { Character, angDiff } from './characters.js';
 import { Agent, S, chooseIdle, coffeeScript } from './behaviors.js';
-import { rupiah, signed, shortRp, short } from './fmt.js';
+import { rupiah, signed, shortRp, short, monthName } from './fmt.js';
 
 const $ = (s) => document.querySelector(s);
 const rand = (a, b) => a + Math.random() * (b - a);
@@ -65,13 +65,13 @@ export function initOffice({ stage, onSelectEmployee }) {
   /* ---------- kamera ---------- */
   let az = Math.PI / 4 + 0.3, azT = Math.PI / 4, zoom = 0.8, zoomT = 0.95;
   const camTarget = new THREE.Vector3(0, 0, 0);
-  let follow = false, selected = null;
+  let follow = false, selected = null, manualTarget = null;
   let W = 1, H = 1;
   function resize() { const r = stage.getBoundingClientRect(); W = Math.max(1, r.width); H = Math.max(1, r.height); renderer.setSize(W, H, false); }
   new ResizeObserver(resize).observe(stage);
   function updateCamera(dt) {
     az = smooth(az, azT, 6, dt); zoom = smooth(zoom, zoomT, 7, dt);
-    const want = follow && selected ? selected.ch.pos : { x: 0, z: 0 };
+    const want = follow && selected ? selected.ch.pos : manualTarget || { x: 0, z: 0 };
     camTarget.x = smooth(camTarget.x, want.x, 3.5, dt); camTarget.z = smooth(camTarget.z, want.z, 3.5, dt);
     const aspect = W / H, h = Math.max(21, 34 / aspect) / (follow && selected ? Math.max(zoom, 1.6) : zoom);
     camera.aspect = aspect; camera.updateProjectionMatrix();
@@ -347,6 +347,7 @@ export function initOffice({ stage, onSelectEmployee }) {
     return out;
   }
 
+  let busyRoles = new Set();
   function handleFinance(f) {
     if (!f || !f.enabled) { fin.enabled = false; fin.data = null; showVault(false); return; }
     const firstTime = fin.first;
@@ -365,6 +366,7 @@ export function initOffice({ stage, onSelectEmployee }) {
     const changed = ps.filter((p) => fin.shown.get(p.id) !== p.saldo && fin.target.get(p.id) !== p.saldo);
     changed.forEach((p) => fin.target.set(p.id, p.saldo));
     refreshVault();
+    busyRoles = new Set();
     routeEvents(fresh.reverse(), changed);
     onFinanceState(f, false);
   }
@@ -378,10 +380,11 @@ export function initOffice({ stage, onSelectEmployee }) {
       if (e.type === 'expense' && e.budgetItemId) push('planner', { ...e, id: e.id + ':p', type: 'budget-use' });
     }
     if (changed.length && !groups.has('treasurer')) groups.set('treasurer', []);
+    busyRoles = new Set();
     for (const [role, evs] of groups) {
       const a = byRole(role);
       if (!a) { if (role === 'treasurer') changed.forEach((p) => applyPocket(p.id)); continue; }
-      ensureHere(a);
+      ensureHere(a); busyRoles.add(role);
       a.enqueue(roleScript(a, evs.slice(-5), role === 'treasurer' ? changed : []));
     }
   }
@@ -435,6 +438,36 @@ export function initOffice({ stage, onSelectEmployee }) {
         );
       }
     }
+    const marker = (spot, status, dur, after) => [S.call((ag) => ag.setStatus(status)), S.walk(spot), S.face(spot.rot), S.act('write', { dur, props: { marker: true } }), S.call(after), S.call((ag) => ag.ch.props({}))];
+    if (a.role === 'planner' && events.length) {
+      const spots = world.POI.boardWrite, sp = spots[(Math.random() * spots.length) | 0], e = events[events.length - 1];
+      steps.push(...marker(sp, e.type === 'budget-use' ? 'Memperbarui pos anggaran di papan' : 'Menulis ulang Papan Anggaran', 2.6, () => drawObj('board')));
+    }
+    if (a.role === 'billing' && events.length) {
+      const e = events[events.length - 1];
+      const st = e.type === 'bill-paid' || e.type === 'bill-pay' ? 'Mencoret tagihan lunas di kalender' : e.type === 'bill-new' ? 'Menandai tagihan baru di kalender' : 'Memperbarui kalender tagihan';
+      steps.push(...marker(world.POI.calendarWrite, st, 2.2, () => drawObj('calendar')));
+    }
+    if (a.role === 'savings' && events.length) {
+      const f = finNow(), e = events.find((x) => x.goalId) || events[events.length - 1];
+      const gi = f ? Math.max(0, f.goals.findIndex((g) => g.id === e.goalId)) : 0, jar = world.jarSlots[Math.min(gi, 4)];
+      steps.push(S.call((ag) => { ag.ch.props({ paper: true }); ag.setStatus(e.type === 'saving' ? (e.amount > 0 ? 'Mengambil dari celengan' : 'Mengisi celengan') : 'Memperbarui rak celengan'); }),
+        S.walk(jar.front), S.face(jar.front.rot), S.act('take', { dur: 1.4 }),
+        S.call((ag) => { ag.ch.props({}); const reached = drawObj('jars'); if (reached.length) { const j = world.jarSlots[reached[0]]; world.confetti(j.x, 1.6, j.z); ag.ch.cheer(); ag.setStatus('Target tabungan tercapai!'); } }),
+        S.act('stand', { dur: 1 }));
+    }
+    if (a.role === 'shopper' && events.length) {
+      const bought = events.some((e) => e.type === 'need');
+      steps.push(S.call((ag) => ag.setStatus(bought ? 'Mengeluarkan barang dari troli' : 'Merapikan troli belanja')),
+        S.walk(trolleyFront()), S.face(trolleyFront().rot), S.act('take', { dur: 1.3 }), S.call(() => drawObj('trolley')));
+      const aci = byRole('treasurer');
+      if (bought && aci) {
+        steps.push(S.call((ag) => { ag.ch.props({ paper: true }); ag.setStatus('Menyerahkan struk ke ' + aci.emp.name); }),
+          { start(ag) { this.done = false; const d = aci.desk; ag.ch.walkTo({ x: d.seat.x - 0.95, z: d.seat.z + (d.face === 's' ? -0.25 : 0.25) }, () => (this.done = true)); }, tick() { return this.done; } },
+          { start(ag) { ag.ch.faceTo(aci.ch.pos.x, aci.ch.pos.z); this.t = 0; }, tick(ag, dt) { return (this.t += dt) > 0.4; } },
+          S.act('take', { dur: 1.1 }), S.call((ag) => { ag.ch.props({}); ag.setStatus('Struk sudah diserahkan'); }));
+      }
+    }
     if (a.role === 'manager' && events.some((e) => e.type === 'income')) {
       steps.push(S.call((ag) => { ag.ch.cheer(); ag.setStatus('Pemasukan masuk!'); }), S.act('sit', { dur: 1.5 }));
     }
@@ -445,8 +478,40 @@ export function initOffice({ stage, onSelectEmployee }) {
     const i = (Math.random() * ps.length) | 0, slot = world.vaultSlots[i], p = ps[i];
     return { kind: 'idle', name: 'vault', status: 'Menghitung uang di brankas', steps: [S.walk(slot.front), S.face(slot.front.rot), S.act('listenStand', { dur: rand(4, 6), status: 'Menghitung uang ' + p.name })] };
   }
-  // dipanggil setiap snapshot baru; tahap berikutnya memakainya untuk objek kantor dan status Aman/Waspada/Kritis
-  function onFinanceState(f, first) {}
+  /* ---------- objek kantor: digambar ulang saat karyawannya selesai mengurus, atau langsung bila tidak ada yang perlu diurus ---------- */
+  const OBJ_ROLE = { board: 'planner', calendar: 'billing', jars: 'savings', trolley: 'shopper' };
+  const jarTags = [];
+  let jarDone = [];
+  const trolleyFront = () => (world.trolley.position.x === world.trolleyHome.x ? world.POI.trolleyHomeFront : world.POI.trolleyReadyFront);
+  function drawObj(kind) {
+    const f = finNow(); if (!f) return [];
+    if (kind === 'board') {
+      world.drawBudgetBoard({ month: monthName(f.today.ym), items: f.budget.filter((b) => b.grp === 'kebutuhan' || b.grp === 'gaya_hidup'), sisaJatah: f.summary.sisaJatah, safeToday: f.summary.safeToday, hariSisa: f.summary.hariSisa, level: f.status.level, hasPlan: f.status.hasPlan, hide: hidden() });
+    }
+    if (kind === 'calendar') {
+      world.drawCalendar({ ym: f.today.ym, monthName: monthName(f.today.ym), todayDay: f.today.day, bills: f.bills.filter((b) => b.status !== 'dilewati') });
+      world.calendarAlarm = f.bills.some((b) => b.status === 'terlambat');
+    }
+    if (kind === 'jars') {
+      const goals = f.goals.slice(0, 5), reached = [];
+      world.setJars(goals.map((g, i) => { const done = g.target > 0 && g.saldo >= g.target; if (done && jarDone[i] === false) reached.push(i); return { p: g.target > 0 ? g.saldo / g.target : 0, done }; }));
+      jarDone = goals.map((g) => g.target > 0 && g.saldo >= g.target);
+      goals.forEach((g, i) => {
+        if (!jarTags[i]) { const el = document.createElement('div'); el.className = 'mtag'; el.innerHTML = '<b></b><span class="amt"></span>'; labels.appendChild(el); jarTags[i] = { el, nm: el.querySelector('b'), amt: el.querySelector('.amt'), slot: world.jarSlots[i], hidden: false, jar: true }; }
+        const T = jarTags[i]; T.hidden = false; T.el.classList.remove('hide'); T.nm.textContent = short(g.name, 12);
+        T.amt.textContent = g.target > 0 ? Math.round((g.saldo / g.target) * 100) + '%' : rupiah(g.saldo);
+      });
+      for (let i = goals.length; i < jarTags.length; i++) { jarTags[i].hidden = true; jarTags[i].el.classList.add('hide'); }
+      return reached;
+    }
+    if (kind === 'trolley') world.setTrolleyItems(f.needs.filter((x) => !x.bought).length);
+    return [];
+  }
+  function onFinanceState(f, first) {
+    for (const [kind, role] of Object.entries(OBJ_ROLE)) if (first || !busyRoles.has(role) || !byRole(role)) drawObj(kind);
+    if (!first && busyRoles.has('planner') === false) drawObj('board');
+  }
+  new MutationObserver(() => { drawObj('board'); for (const a of agents) paintMonitor(a); }).observe(document.body, { attributes: true, attributeFilter: ['class'] });
 
 
   /* ---------- data → kantor ---------- */
@@ -592,9 +657,10 @@ export function initOffice({ stage, onSelectEmployee }) {
   }
 
   function placeMoneyLabels() {
-    for (const L of fin.legend ? [...fin.labels, fin.legend] : fin.labels) {
-      if (L.hidden || !fin.enabled) continue;
-      tmp.set(L.slot.x, L.legendOnly ? 1.62 : world.vaultTopY(L.idx, L.count) + 0.12, L.slot.z); tmp.project(camera);
+    for (const L of [...fin.labels, ...(fin.legend ? [fin.legend] : []), ...jarTags]) {
+      if (!L || L.hidden || !fin.enabled) continue;
+      if (L.jar) { const far = zoom < 1.25 && !follow; L.el.style.display = far ? 'none' : ''; if (far) continue; }
+      tmp.set(L.slot.x, L.jar ? L.slot.y : L.legendOnly ? 1.62 : world.vaultTopY(L.idx, L.count) + 0.12, L.slot.z); tmp.project(camera);
       const off = tmp.z > 1 || Math.abs(tmp.x) > 1.2 || Math.abs(tmp.y) > 1.2;
       L.el.style.visibility = off ? 'hidden' : '';
       L.el.style.transform = `translate(${((tmp.x * 0.5 + 0.5) * W).toFixed(1)}px, ${((-tmp.y * 0.5 + 0.5) * H).toFixed(1)}px) translate(-50%, -100%)`;
@@ -671,6 +737,7 @@ export function initOffice({ stage, onSelectEmployee }) {
   // dipakai untuk uji otomatis: majukan simulasi tanpa menunggu frame
   window.__kantor = {
     step(sec) { for (let t = 0; t < sec; t += 0.05) { simT += 0.05; for (const a of agents) { a.update(0.05); a.ch.update(0.05, { lookAt: a.lookAt }); } world.tick(0.05); } for (const a of agents) paintMonitor(a); },
+    look: (x, z, zm, angle) => { manualTarget = { x, z }; zoomT = zm; if (angle != null) azT = angle; },
     focus: (id, angle) => { const a = byId.get(id); if (a) { select(a); setFollow(true); zoomT = 3; if (angle != null) azT = angle; } },
     agents: () => agents.map((a) => ({ id: a.id, status: a.status, script: a.script && a.script.name, q: a.queue.map((s) => s.name).join(','), away: a.away, x: +a.ch.pos.x.toFixed(2), z: +a.ch.pos.z.toFixed(2) })),
   };

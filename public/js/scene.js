@@ -306,7 +306,7 @@ export function createWorld(scene) {
   W.openLift = (i, hold = 2.5) => { lifts[i].target = 1; lifts[i].holdT = hold; };
   mesh(new THREE.PlaneGeometry(0.66, 0.16), new THREE.MeshBasicMaterial({ map: plateTex('LIFT · L38'), toneMapped: false }), 12.1, 2.85, -RZ + 0.27, null, false);
 
-  /* ================= papan task 3D ================= */
+  /* ================= Papan Anggaran (Kartika) ================= */
   const BOARD = { x: -2.4, z: -6.9, w: 4.8 };
   const boardTex = canvasTex(1024, 420);
   [-BOARD.w / 2 + 0.1, BOARD.w / 2 - 0.1].forEach((dx) => cyl(0.04, 0.04, 2.7, M(0x3c4352), BOARD.x + dx, 1.35, BOARD.z, 8));
@@ -315,36 +315,113 @@ export function createWorld(scene) {
   box(1.6, 0.05, 0.16, M(0x9aa0b0), BOARD.x, 0.74, BOARD.z + 0.08);
   nav.box(BOARD.x, BOARD.z, BOARD.w + 0.1, 0.3, 0.25);
   W.board = BOARD;
-  W.drawBoard = (cols, projects, team) => {
+  const rpx = (v, hide) => (hide ? 'Rp •••' : (v < 0 ? '−Rp ' : 'Rp ') + Math.abs(Math.round(v)).toLocaleString('id-ID'));
+  const LV = { aman: ['AMAN', '#2f8a52'], waspada: ['WASPADA', '#c27a1a'], kritis: ['KRITIS', '#c0392b'] };
+  // d: { month, items:[{label,amount,spent}], sisaJatah, safeToday, hariSisa, level, hasPlan, hide }
+  W.drawBudgetBoard = (d) => {
     const g = boardTex.userData.g, w = 1024, h = 420;
     g.fillStyle = '#fbfbf8'; g.fillRect(0, 0, w, h);
-    g.fillStyle = '#232842'; g.font = '800 26px sans-serif'; g.fillText('PAPAN TASK', 24, 38);
-    const titles = ['OPEN', 'ON PROGRESS', 'DONE HARI INI'];
-    const colW = (w - 48) / 3;
-    const proj = new Map(projects.map((p) => [p.id, p])), tm = new Map(team.map((e) => [e.id, e]));
-    cols.forEach((list, c) => {
-      const x0 = 24 + c * colW;
-      g.fillStyle = '#5b6276'; g.font = '700 18px sans-serif'; g.fillText(titles[c] + '  ' + list.length, x0, 72);
-      g.strokeStyle = '#d8dbe5'; g.lineWidth = 2; g.beginPath(); g.moveTo(x0, 82); g.lineTo(x0 + colW - 16, 82); g.stroke();
-      list.slice(0, 8).forEach((t, k) => {
-        const cx = x0 + (k % 2) * ((colW - 16) / 2), cy = 94 + Math.floor(k / 2) * 78, cw = (colW - 16) / 2 - 8, ch = 68;
-        const p = proj.get(t.projectId);
-        g.fillStyle = t.status === 'review' ? '#dfe3ff' : c === 2 ? '#e1f2e6' : '#fff4c6';
-        g.save(); g.translate(cx + cw / 2, cy + ch / 2); g.rotate(((k * 37) % 7 - 3) * 0.006); g.fillRect(-cw / 2, -ch / 2, cw, ch);
-        g.fillStyle = p ? p.color : '#8a90a0'; g.fillRect(-cw / 2, -ch / 2, cw, 6);
-        g.fillStyle = '#232842'; g.font = '600 14px sans-serif';
-        const words = String(t.title).split(' '); let line = '', y = -ch / 2 + 24, n = 0;
-        for (const wd of words) { const tt = line ? line + ' ' + wd : wd; if (g.measureText(tt).width > cw - 14) { g.fillText(line, -cw / 2 + 7, y); y += 17; line = wd; if (++n >= 2) { line += '…'; break; } } else line = tt; }
-        if (n < 3) g.fillText(line, -cw / 2 + 7, y);
-        const who = tm.get(t.assigneeId);
-        if (who) { g.fillStyle = who.look.shirt; g.beginPath(); g.arc(cw / 2 - 13, ch / 2 - 13, 9, 0, TAU); g.fill(); g.fillStyle = '#fff'; g.font = '700 10px sans-serif'; g.fillText(who.name[0], cw / 2 - 16.5, ch / 2 - 9.5); }
-        g.restore();
-      });
-      if (list.length > 8) { g.fillStyle = '#5b6276'; g.font = '500 15px sans-serif'; g.fillText('+' + (list.length - 8) + ' lainnya', x0, 410); }
+    g.fillStyle = '#232842'; g.font = '800 26px sans-serif'; g.fillText('PAPAN ANGGARAN' + (d && d.month ? ' · ' + d.month.toUpperCase() : ''), 24, 40);
+    if (!d) { g.fillStyle = '#8a90a0'; g.font = '600 22px sans-serif'; g.fillText('Menunggu data dari Arus…', 24, 110); boardTex.needsUpdate = true; return; }
+    const [lt, lc] = LV[d.level] || LV.aman;
+    g.font = '800 20px sans-serif'; const tw = g.measureText(lt).width;
+    g.fillStyle = lc; g.beginPath(); g.roundRect(w - 40 - tw, 16, tw + 24, 32, 9); g.fill(); g.fillStyle = '#fff'; g.fillText(lt, w - 28 - tw, 39);
+    g.fillStyle = '#5b6276'; g.font = '600 18px sans-serif';
+    g.fillText(d.hasPlan ? `Sisa jatah ${rpx(d.sisaJatah, d.hide)}   ·   aman ${rpx(d.safeToday, d.hide)}/hari   ·   ${d.hariSisa} hari lagi` : 'Pemasukan bulan ini belum diisi di Arus', 24, 74);
+    g.strokeStyle = '#d8dbe5'; g.lineWidth = 2; g.beginPath(); g.moveTo(24, 88); g.lineTo(w - 24, 88); g.stroke();
+    const items = d.items.slice(0, 8);
+    if (!items.length) { g.fillStyle = '#8a90a0'; g.font = '600 20px sans-serif'; g.fillText('Anggaran bulan ini belum diisi.', 24, 130); }
+    const colW = (w - 72) / 2;
+    items.forEach((it, i) => {
+      const x = 24 + (i % 2) * (colW + 24), y = 118 + Math.floor(i / 2) * 74, p = it.amount > 0 ? it.spent / it.amount : 0;
+      const col = p >= 1 ? '#d64545' : p >= 0.8 ? '#e3962f' : '#3f9a63';
+      g.fillStyle = '#232842'; g.font = '700 20px sans-serif'; g.fillText(it.label.length > 22 ? it.label.slice(0, 21) + '…' : it.label, x, y);
+      const r = Math.round(p * 100) + '%'; g.fillStyle = col; g.font = '800 20px sans-serif'; g.fillText(r, x + colW - g.measureText(r).width, y);
+      g.fillStyle = '#e7e9ef'; g.beginPath(); g.roundRect(x, y + 10, colW, 16, 8); g.fill();
+      g.fillStyle = col; g.beginPath(); g.roundRect(x, y + 10, Math.max(8, colW * Math.min(1, p)), 16, 8); g.fill();
+      g.fillStyle = '#5b6276'; g.font = '500 15px sans-serif'; g.fillText(`${rpx(it.spent, d.hide)} dari ${rpx(it.amount, d.hide)}`, x, y + 44);
     });
     boardTex.needsUpdate = true;
   };
-  W.drawBoard([[], [], []], [], []);
+  W.drawBudgetBoard(null);
+
+  /* ================= kalender tagihan (Irham) ================= */
+  const CAL = { x: -6.5, z: -6.95, w: 1.7, h: 1.25 };
+  const calTex = canvasTex(512, 380);
+  [-CAL.w / 2 + 0.05, CAL.w / 2 - 0.05].forEach((dx) => cyl(0.03, 0.03, 2.2, M(0x3c4352), CAL.x + dx, 1.1, CAL.z, 8));
+  box(CAL.w + 0.08, CAL.h + 0.08, 0.05, M(0x3c4352), CAL.x, 1.55, CAL.z - 0.01);
+  mesh(new THREE.PlaneGeometry(CAL.w, CAL.h), new THREE.MeshStandardMaterial({ map: calTex, roughness: 0.55 }), CAL.x, 1.55, CAL.z + 0.02, null, false);
+  nav.box(CAL.x, CAL.z, CAL.w + 0.1, 0.25, 0.2);
+  W.calendar = CAL;
+  const HARI = ['Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab', 'Min'];
+  const BC = { lunas: '#3f9a63', terlambat: '#d64545', hari_ini: '#e3962f', besok: '#d9b23a', nanti: '#5b7bd6', dilewati: '#9aa0ad' };
+  // d: { ym, monthName, todayDay, bills:[{dueDay,name,status}] }
+  W.drawCalendar = (d) => {
+    const g = calTex.userData.g, w = 512, h = 380;
+    g.fillStyle = '#fbfbf8'; g.fillRect(0, 0, w, h);
+    g.fillStyle = '#c0392b'; g.fillRect(0, 0, w, 46);
+    g.fillStyle = '#fff'; g.font = '800 22px sans-serif'; g.fillText('TAGIHAN · ' + (d ? d.monthName.toUpperCase() : ''), 16, 31);
+    if (!d) { calTex.needsUpdate = true; return; }
+    const y0 = Number(d.ym.slice(0, 4)), m0 = Number(d.ym.slice(5, 7)) - 1;
+    const first = (new Date(Date.UTC(y0, m0, 1)).getUTCDay() + 6) % 7, dim = new Date(Date.UTC(y0, m0 + 1, 0)).getUTCDate();
+    const cw = (w - 16) / 7, ch = 50;
+    g.font = '700 13px sans-serif'; HARI.forEach((t, i) => { g.fillStyle = i >= 5 ? '#c0392b' : '#5b6276'; g.fillText(t, 8 + i * cw + 6, 64); });
+    const byDay = new Map(); for (const b of d.bills) { if (!byDay.has(b.dueDay)) byDay.set(b.dueDay, []); byDay.get(b.dueDay).push(b); }
+    for (let day = 1; day <= dim; day++) {
+      const k = first + day - 1, cx = 8 + (k % 7) * cw, cy = 72 + Math.floor(k / 7) * ch;
+      const list = byDay.get(day) || [];
+      if (list.length) { const b = list.find((x) => x.status !== 'lunas') || list[0]; g.fillStyle = BC[b.status] + '26'; g.fillRect(cx + 2, cy + 2, cw - 4, ch - 4); }
+      if (day === d.todayDay) { g.strokeStyle = '#232842'; g.lineWidth = 3; g.strokeRect(cx + 2.5, cy + 2.5, cw - 5, ch - 5); }
+      g.fillStyle = day < d.todayDay ? '#9aa0ad' : '#232842'; g.font = '700 15px sans-serif'; g.fillText(String(day), cx + 6, cy + 19);
+      list.slice(0, 2).forEach((b, i) => {
+        g.fillStyle = BC[b.status]; g.font = '700 11px sans-serif';
+        const t = b.name.length > 8 ? b.name.slice(0, 7) + '…' : b.name; g.fillText(t, cx + 5, cy + 33 + i * 12);
+        if (b.status === 'lunas') { g.strokeStyle = BC.lunas; g.lineWidth = 2; g.beginPath(); g.moveTo(cx + 4, cy + 29 + i * 12); g.lineTo(cx + 5 + g.measureText(t).width, cy + 29 + i * 12); g.stroke(); }
+      });
+      if (list.length && list.every((x) => x.status === 'lunas')) { g.strokeStyle = BC.lunas; g.lineWidth = 3; g.beginPath(); g.moveTo(cx + cw - 22, cy + 12); g.lineTo(cx + cw - 16, cy + 18); g.lineTo(cx + cw - 6, cy + 6); g.stroke(); }
+    }
+    calTex.needsUpdate = true;
+  };
+  W.drawCalendar(null);
+  // kedip merah saat ada tagihan terlambat
+  const calAlarm = mesh(new THREE.PlaneGeometry(CAL.w + 0.16, CAL.h + 0.16), new THREE.MeshBasicMaterial({ color: 0xff3b30, transparent: true, opacity: 0, depthWrite: false }), CAL.x, 1.55, CAL.z - 0.04, null, false);
+  W.calendarAlarm = false;
+
+  /* ================= rak celengan kaca (Fariz) ================= */
+  const JR = { x: 1.75, z: -7.45 };
+  rbox(2.5, 0.9, 0.42, 0.04, M(0x6f533c), JR.x, 0.45, JR.z); box(2.56, 0.04, 0.46, M(0x5b4632), JR.x, 0.92, JR.z);
+  nav.box(JR.x, JR.z, 2.5, 0.42, 0.2);
+  const jarGlass = new THREE.MeshStandardMaterial({ color: 0xd8efff, transparent: true, opacity: 0.42, roughness: 0.1, metalness: 0.1, depthWrite: false, side: THREE.DoubleSide });
+  const jarRim = M(0x9fc4dd);
+  W.jarSlots = [-1, -0.5, 0, 0.5, 1].map((dx) => {
+    const x = JR.x + dx, y0 = 0.94, g = new THREE.Group(); g.position.set(x, y0, JR.z); g.visible = false; scene.add(g);
+    const glass = new THREE.Mesh(new THREE.CylinderGeometry(0.17, 0.17, 0.46, 20, 1, true), jarGlass); glass.position.y = 0.23; g.add(glass);
+    const base = new THREE.Mesh(new THREE.CylinderGeometry(0.175, 0.175, 0.02, 20), jarRim); base.position.y = 0.01; g.add(base);
+    const neck = new THREE.Mesh(new THREE.TorusGeometry(0.17, 0.012, 6, 24), jarRim); neck.rotation.x = Math.PI / 2; neck.position.y = 0.45; g.add(neck);
+    const lid = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.18, 0.04, 20), M(0xc9a227, { metalness: 0.6, roughness: 0.35 })); lid.position.y = 0.48; g.add(lid);
+    const slot = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.012, 0.02), M(0x2d3242)); slot.position.y = 0.505; g.add(slot);
+    const fillMat = new THREE.MeshStandardMaterial({ color: 0xe0b23a, roughness: 0.45, metalness: 0.35, emissive: 0x000000 });
+    const fill = new THREE.Mesh(new THREE.CylinderGeometry(0.155, 0.155, 1, 20), fillMat); fill.scale.y = 0.001; fill.position.y = 0.0005; g.add(fill);
+    return { x, z: JR.z, y: y0 + 0.62 + (Math.round((dx + 1) * 2) % 2) * 0.32, group: g, fill, fillMat, p: 0, want: 0, done: false, front: { x, z: JR.z + 0.85, rot: Math.PI } };
+  });
+  // list: [{p, done}] (p = 0..1 progres target)
+  W.setJars = (list) => W.jarSlots.forEach((j, i) => { const it = list[i]; j.group.visible = !!it; if (it) { j.want = Math.max(0, Math.min(1, it.p)); j.done = !!it.done; } });
+
+  /* ================= troli belanja (Cimol) ================= */
+  const trolley = new THREE.Group(); scene.add(trolley);
+  const wire = M(0x9aa0ad, { metalness: 0.6, roughness: 0.35 });
+  [[0, 0.5, -0.26, 0.62, 0.02, 0.02], [0, 0.5, 0.26, 0.62, 0.02, 0.02], [-0.31, 0.5, 0, 0.02, 0.02, 0.54], [0.31, 0.5, 0, 0.02, 0.02, 0.54],
+   [0, 0.78, -0.28, 0.66, 0.02, 0.02], [0, 0.78, 0.28, 0.66, 0.02, 0.02], [-0.33, 0.78, 0, 0.02, 0.02, 0.58], [0.33, 0.78, 0, 0.02, 0.02, 0.58]].forEach(([x, y, z, w, h, d]) => box(w, h, d, wire, x, y, z, trolley));
+  box(0.62, 0.02, 0.54, wire, 0, 0.5, 0, trolley);
+  [[-0.31, -0.26], [0.31, -0.26], [-0.33, 0.28], [0.33, 0.28]].forEach(([x, z]) => box(0.02, 0.3, 0.02, wire, x, 0.64, z, trolley));
+  [[-0.27, -0.22], [0.27, -0.22], [-0.27, 0.22], [0.27, 0.22]].forEach(([x, z]) => { cyl(0.012, 0.012, 0.45, wire, x, 0.27, z, 6, trolley); const wh = cyl(0.05, 0.05, 0.03, M(0x2d3242), x, 0.05, z, 12, trolley); wh.rotation.z = Math.PI / 2; });
+  box(0.02, 0.02, 0.5, M(0xd45a72), -0.42, 0.98, 0, trolley); [-0.2, 0.2].forEach((z) => { const h = box(0.12, 0.02, 0.02, wire, -0.37, 0.9, z, trolley); h.rotation.z = 0.9; });
+  const goods = [0xe0952f, 0x3f9a63, 0xd45a72, 0x5b7bd6, 0xf1e7d2, 0xc0392b, 0x6a5ad8, 0x2f8f9d].map((c, i) => { const m = box(0.14 + (i % 3) * 0.03, 0.12 + (i % 2) * 0.08, 0.12, M(c), -0.18 + (i % 4) * 0.12, 0.58 + Math.floor(i / 4) * 0.12, -0.12 + (i % 2) * 0.22, trolley); m.visible = false; return m; });
+  W.trolleyHome = { x: 9.3, z: 2.4, rot: 0 };
+  W.trolleyReady = { x: 11.6, z: -3.7, rot: Math.PI / 2 };
+  trolley.position.set(W.trolleyHome.x, 0, W.trolleyHome.z);
+  W.trolley = trolley;
+  W.setTrolleyItems = (n) => goods.forEach((m, i) => (m.visible = i < n));
 
   /* ================= meja kerja ================= */
   const pendants = [];
@@ -556,14 +633,19 @@ export function createWorld(scene) {
     coffeeQueue: [P(9.3, 6.55, 0), P(9.3, 5.7, 0), P(9.3, 4.9, 0)],
     coffeeDrink: [P(BAR.x - 0.75, BAR.z, Math.PI / 2), P(BAR.x + 0.75, BAR.z, -Math.PI / 2), P(BAR.x, BAR.z - 0.75, 0)],
     sofa: [P(SOFA.x - 0.9, SOFA.z - 0.35, Math.PI), P(SOFA.x, SOFA.z - 0.35, Math.PI), P(SOFA.x + 0.9, SOFA.z - 0.35, Math.PI)],
-    windowPairs: [[P(-13.1, -1.2, -Math.PI / 2 - 0.6), P(-12.6, -0.2, -Math.PI / 2 - 2.4)], [P(0.9, -7.2, Math.PI - 0.6), P(1.9, -6.8, Math.PI + 1.9)]],
-    windowSolo: [P(-13.2, 1.8, -Math.PI / 2), P(-13.2, 3.0, -Math.PI / 2), P(1.8, -7.3, Math.PI), P(-6.4, -7.3, Math.PI)],
+    windowPairs: [[P(-13.1, -1.2, -Math.PI / 2 - 0.6), P(-12.6, -0.2, -Math.PI / 2 - 2.4)]],
+    windowSolo: [P(-13.2, 1.8, -Math.PI / 2), P(-13.2, 3.0, -Math.PI / 2)],
     pingpong: [P(PP.x - 1.75, PP.z, Math.PI / 2), P(PP.x + 1.75, PP.z, -Math.PI / 2)],
     stretch: [P(5.6, 3.0, 0.4), P(7.4, 2.6, -0.3), P(-5.2, 3.2, 0.2)],
     smoke: [P(ASH.x - 0.62, ASH.z - 0.3), P(ASH.x + 0.45, ASH.z - 0.55), P(ASH.x - 0.35, ASH.z + 0.65)],
-    phone: [[P(-11.0, 2.4, 0.2), P(-9.4, 2.7, -0.2)], [P(9.0, 2.3, 1.2), P(9.5, 3.3, 1.2)], [P(-6.6, 3.1, 0.3), P(-5.0, 3.4, 0.3)], [P(12.4, -5.6, Math.PI), P(11.2, -5.8, Math.PI)]],
+    phone: [[P(-11.0, 2.4, 0.2), P(-9.4, 2.7, -0.2)], [P(4.4, 3.5, 0.2), P(3.2, 3.6, -0.2)], [P(-6.6, 3.1, 0.3), P(-5.0, 3.4, 0.3)], [P(12.4, -5.6, Math.PI), P(11.2, -5.8, Math.PI)]],
     water: P(7.8, 6.85, 0),
     liftCall: P(12.1, -6.4, Math.PI),
+    calendarWrite: P(CAL.x, CAL.z + 0.85, Math.PI),
+    trolleyHomeFront: P(W.trolleyHome.x - 0.9, W.trolleyHome.z, Math.PI / 2),
+    trolleyReadyFront: P(W.trolleyReady.x, W.trolleyReady.z + 0.9, Math.PI),
+    briefing: [P(BOARD.x - 1.6, BOARD.z + 2.2, Math.PI - 0.35), P(BOARD.x - 0.55, BOARD.z + 2.4, Math.PI - 0.1), P(BOARD.x + 0.55, BOARD.z + 2.4, Math.PI + 0.1), P(BOARD.x + 1.6, BOARD.z + 2.2, Math.PI + 0.35), P(BOARD.x - 1.1, BOARD.z + 3.2, Math.PI - 0.2), P(BOARD.x + 1.1, BOARD.z + 3.2, Math.PI + 0.2)],
+    briefingLead: P(BOARD.x + 2.2, BOARD.z + 1.0, -Math.PI / 2 - 0.5),
   };
   W.MT = MT; W.MR = MR;
 
@@ -601,6 +683,13 @@ export function createWorld(scene) {
       if (u.life <= 0) { scene.remove(m); m.material.dispose(); confetti.splice(i, 1); }
     }
     fan.rotation.y += dt * 9;
+    for (const j of W.jarSlots) {
+      if (!j.group.visible) continue;
+      j.p += (j.want - j.p) * Math.min(1, dt * 2.5);
+      const hgt = Math.max(0.001, 0.44 * j.p); j.fill.scale.y = hgt; j.fill.position.y = hgt / 2 + 0.005;
+      j.fillMat.emissive.setHex(j.done ? 0x6b4a00 : 0x000000); j.fillMat.emissiveIntensity = j.done ? 0.6 + Math.sin(performance.now() / 300) * 0.4 : 0;
+    }
+    calAlarm.material.opacity = W.calendarAlarm ? 0.25 + Math.sin(performance.now() / 220) * 0.2 : 0;
     for (let i = puffs.length - 1; i >= 0; i--) {
       const m = puffs[i], u = m.userData;
       u.life -= dt; m.position.addScaledVector(u.v, dt); u.v.x *= 1 - dt * 0.5; u.v.z *= 1 - dt * 0.5;
