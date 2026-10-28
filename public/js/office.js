@@ -576,7 +576,59 @@ export function initOffice({ stage, onSelectEmployee }) {
         cimol.enqueue(trolleyScript(due)); return true;
       },
     ];
+    if (rhythm(f)) return;
     for (const r of reactions) if (r()) break;
+  }
+
+  /* ---------- ritme: briefing pagi, tutup kas sore, rapat anggaran awal bulan ---------- */
+  // Penanda "sudah dilakukan" disimpan per browser supaya tidak berulang dalam hari/bulan yang sama.
+  const doneKey = (k) => 'kantorAI.ritme.' + k;
+  const isDone = (k) => LS.get(doneKey(k)) === '1';
+  const markDone = (k) => LS.set(doneKey(k), '1');
+  function rhythm(f) {
+    const now = new Date(), h = now.getHours() + now.getMinutes() / 60, wh = workHours(), iso = f.today.iso;
+    const mgr = byRole('manager'), planner = byRole('planner'), aci = byRole('treasurer');
+    const here = agents.filter((a) => present(a));
+    if (h >= wh.start + 0.05 && h < wh.start + 1.5 && !isDone('brief' + iso) && free(mgr) && here.length >= Math.min(4, agents.length)) {
+      markDone('brief' + iso); briefingScripts(f, mgr, here.filter((a) => a !== mgr)); return true;
+    }
+    if (f.today.day <= 3 && h >= wh.start + 0.5 && h < wh.end - 0.5 && !isDone('rapat' + f.today.ym) && free(mgr) && free(planner)) {
+      markDone('rapat' + f.today.ym);
+      const plan = f.budget.reduce((t, b) => t + b.amount, 0);
+      meetingScripts(mgr, planner, `Anggaran ${monthName(f.today.ym)}: ${hidden() ? 'Rp •••' : rupiah(plan)} untuk ${f.budget.length} pos`, 'RAPAT ANGGARAN AWAL BULAN', 'Anggaran bulan ini disepakati', 'Semangat untuk bulan ini!');
+      return true;
+    }
+    if (h >= wh.end - 0.3 && h < wh.end && !isDone('kas' + iso) && free(aci) && vaultPockets().length) {
+      markDone('kas' + iso);
+      const ps = vaultPockets(), steps = [];
+      ps.forEach((p, i) => { const sl = world.vaultSlots[i]; steps.push(S.walk(sl.front), S.face(sl.front.rot), S.act('listenStand', { dur: 1.6, status: 'Tutup kas: menghitung ' + p.name })); });
+      steps.push(S.call((ag) => ag.setStatus('Kas hari ini cocok dengan Arus ✓')), S.act('stand', { dur: 1.5 }));
+      aci.enqueue({ kind: 'task', name: 'closing', status: 'Tutup kas sore', steps });
+      return true;
+    }
+    return false;
+  }
+  function briefingScripts(f, mgr, crew) {
+    const P = world.POI, sess = { done: false }, S2 = f.summary;
+    const soon = f.bills.filter((b) => b.status === 'terlambat' || b.status === 'hari_ini' || b.status === 'besok');
+    const buy = f.needs.filter((x) => x.due);
+    const lines = [
+      'Selamat pagi, tim!',
+      f.status.hasPlan ? `Sisa jatah ${hidden() ? 'Rp •••' : rupiah(S2.sisaJatah)}, aman ${hidden() ? 'Rp •••' : rupiah(S2.safeToday)} hari ini` : 'Pemasukan bulan ini belum dicatat',
+      soon.length ? 'Tagihan perlu perhatian: ' + soon.map((b) => b.name).slice(0, 3).join(', ') : 'Tidak ada tagihan mendesak',
+      buy.length ? 'Belanja hari ini: ' + buy.map((x) => x.name).slice(0, 3).join(', ') : 'Tidak ada belanja hari ini',
+      'Status kantor: ' + ({ aman: 'Aman', waspada: 'Waspada', kritis: 'Kritis' }[f.status.level]) + '. Ayo kerja!',
+    ];
+    crew.slice(0, P.briefing.length).forEach((a, i) => {
+      const sp = P.briefing[i];
+      a.enqueue({ kind: 'task', name: 'briefing', status: 'Ikut briefing pagi', steps: [S.walk(sp), S.face(sp.rot), S.act('listenStand', { status: 'Mendengarkan briefing pagi', until: () => sess.done, max: 60 }), S.call((ag) => ag.ch.wave())] });
+    });
+    const lead = P.briefingLead;
+    mgr.enqueue({ kind: 'task', name: 'briefing', status: 'Memimpin briefing pagi', steps: [
+      S.walk(lead), S.face(lead.rot), S.wait(() => crew.every((a) => a.away || (a.script && a.script.name === 'briefing' && !a.ch.curve)), 15),
+      S.act('present', { dur: lines.length * 4.2, status: lines[0], lookAt: { x: world.board.x, z: world.board.z + 2.6 }, onTick: (ag, dt, t) => ag.setStatus(lines[Math.min(lines.length - 1, Math.floor(t / 4.2))]) }),
+      S.call((ag) => { sess.done = true; ag.ch.cheer(); }), S.act('stand', { dur: 1 }),
+    ], onEnd: () => { sess.done = true; } });
   }
   function reportScript(a, mgr, text) {
     const d = mgr.desk, spot = { x: d.x + 0.35, z: d.z + (d.face === 's' ? 1.0 : -1.0) };
@@ -585,20 +637,20 @@ export function initOffice({ stage, onSelectEmployee }) {
       S.act('talk', { dur: 6, lookAt: mgr.ch.pos, status: text }), S.call(() => { if (!mgr.away) mgr.setStatus('Menerima laporan ' + a.emp.name); }),
     ] };
   }
-  function meetingScripts(mgr, who, reason) {
+  function meetingScripts(mgr, who, reason, heading = 'RAPAT DARURAT', after = 'Rencana penghematan disepakati', mgrAfter = 'Semua pengeluaran ditahan dulu') {
     const P = world.POI, sess = { p: false, m: false, t: 0, done: false };
     who.enqueue({ kind: 'task', name: 'meeting', status: 'Dipanggil rapat darurat', steps: [
       S.call((ag) => ag.ch.props({ laptop: true })), S.walk(P.meetPresenter), S.faceTo(P.meetCenter), S.call((ag) => { sess.p = true; ag.ch.props({}); }),
-      S.act('present', { status: 'Rapat darurat: ' + short(reason, 30), lookAt: mgr.ch.pos, max: 40,
-        onTick: (ag, dt) => { if (sess.m) sess.t += dt; world.meetingScreen(reason, `${who.emp.name} → ${mgr.emp.name}`, sess.t / 9, 'RAPAT DARURAT'); },
+      S.act('present', { status: (heading === 'RAPAT DARURAT' ? 'Rapat darurat: ' : 'Rapat: ') + short(reason, 30), lookAt: mgr.ch.pos, max: 40,
+        onTick: (ag, dt) => { if (sess.m) sess.t += dt; world.meetingScreen(reason, `${who.emp.name} → ${mgr.emp.name}`, sess.t / 9, heading); },
         until: () => sess.t >= 9 }),
-      S.call((ag) => { sess.done = true; world.meetingScreen(null); ag.setStatus('Rencana penghematan disepakati'); }), S.act('stand', { dur: 1.2 }),
+      S.call((ag) => { sess.done = true; world.meetingScreen(null); ag.setStatus(after); }), S.act('stand', { dur: 1.2 }),
     ], onEnd: () => { sess.done = true; world.meetingScreen(null); } });
     const seat = P.meetSeats[0];
-    mgr.enqueue({ kind: 'task', name: 'meeting', status: 'Memanggil rapat darurat', steps: [
+    mgr.enqueue({ kind: 'task', name: 'meeting', status: heading === 'RAPAT DARURAT' ? 'Memanggil rapat darurat' : 'Memimpin ' + heading.toLowerCase(), steps: [
       S.sit({ seat, front: { x: seat.x, z: seat.z + 0.75 } }), S.call(() => (sess.m = true)),
-      S.act('listen', { status: 'Memimpin rapat darurat', lookAt: who.ch.pos, until: () => sess.done, max: 50 }),
-      S.call((ag) => ag.setStatus('Semua pengeluaran ditahan dulu')), S.act('sit', { dur: 1.5 }),
+      S.act('listen', { status: 'Memimpin ' + heading.toLowerCase(), lookAt: who.ch.pos, until: () => sess.done, max: 50 }),
+      S.call((ag) => ag.setStatus(mgrAfter)), S.act('sit', { dur: 1.5 }),
     ] });
   }
   function trolleyScript(toReady) {
