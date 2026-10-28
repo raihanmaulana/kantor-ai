@@ -1,16 +1,16 @@
-// Kantor 3D: merender dunia, menggerakkan karyawan, dan menerjemahkan perubahan data task
-// (selisih state lama → baru) menjadi animasi di antrean masing-masing karyawan.
+// Kantor 3D: merender dunia, menggerakkan karyawan, dan menerjemahkan kegiatan & kondisi keuangan
+// dari Arus menjadi animasi di antrean masing-masing karyawan.
 import * as THREE from 'three';
 import { api, LS } from './api.js';
 import { createWorld, RX, RZ } from './scene.js';
 import { Character, angDiff } from './characters.js';
 import { Agent, S, chooseIdle, coffeeScript } from './behaviors.js';
+import { rupiah, signed, shortRp, short } from './fmt.js';
 
 const $ = (s) => document.querySelector(s);
 const rand = (a, b) => a + Math.random() * (b - a);
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const smooth = (cur, tgt, rate, dt) => cur + (tgt - cur) * (1 - Math.exp(-rate * dt));
-const short = (s, n = 38) => { s = String(s || '').replace(/\s+/g, ' ').trim(); return s.length > n ? s.slice(0, n - 1) + '…' : s; };
 
 export function initOffice({ stage, onSelectEmployee }) {
   /* ---------- renderer ---------- */
@@ -98,13 +98,13 @@ export function initOffice({ stage, onSelectEmployee }) {
   $('#cam-overview').addEventListener('click', () => setFollow(false));
   $('#cam-follow').addEventListener('click', () => { if (!selected) { const a = agents.find((x) => !x.away); if (a) select(a); } setFollow(true); });
 
+
   /* ---------- karyawan ---------- */
   const agents = [];
   const byId = new Map();
+  const byRole = (role) => agents.find((x) => x.role === role);
   const reservations = new Map();
   let simT = 0;
-  const visual = { pendingWrite: new Set(), pendingPick: new Set(), pendingDone: new Set() };
-  const sessions = new Map();   // presentasi yang sedang berjalan per task
 
   const O = {
     world, agents,
@@ -125,41 +125,34 @@ export function initOffice({ stage, onSelectEmployee }) {
     decide: (a) => decide(a),
   };
 
-  function tasksNow() { return (api.state && api.state.tasks) || []; }
-  function taskById(id) { return tasksNow().find((t) => t.id === id); }
-  function workTaskOf(a) {
-    return tasksNow().filter((t) => t.assigneeId === a.id && t.status === 'in_progress' && !visual.pendingPick.has(t.id)).sort((x, y) => (x.startedAt || 0) - (y.startedAt || 0))[0] || null;
-  }
-  function waitingTaskOf(a) { return tasksNow().find((t) => t.assigneeId === a.id && t.status === 'review' && !t.reviewUntil) || null; }
+  const finNow = () => { const f = api.state && api.state.finance; return f && f.enabled ? f : null; };
   const workHours = () => (api.state && api.state.workHours) || { start: 8, end: 17 };
   const inWorkHours = () => { const n = new Date(); const h = n.getHours() + n.getMinutes() / 60; const w = workHours(); return h >= w.start && h < w.end; };
   function hasDuty(a) {
-    if (workTaskOf(a) || waitingTaskOf(a)) return true;
     if (a.queue.some((s) => s.kind === 'task')) return true;
     if (a.script && a.script.kind === 'task') return true;
-    if (a.role === 'manager' && tasksNow().some((t) => t.status === 'review' && t.reviewUntil)) return true;
     return a.stayUntil > simT;
   }
   function shouldBeHere(a) { return inWorkHours() || hasDuty(a); }
 
-  const ROLE_ORDER = ['coordinator', 'engineer', 'designer', 'treasurer', 'manager'];
+  // urutan meja terbuka dari kiri ke kanan; Bendahara paling dekat dengan brankas
+  const DESK_ORDER = ['planner', 'billing', 'savings', 'shopper', 'treasurer'];
+  const DESK_LOOK = { planner: 'coordinator', shopper: 'designer' };
   function buildTeam(team) {
     let slot = 0;
-    const order = [...team].sort((x, y) => ROLE_ORDER.indexOf(x.role) - ROLE_ORDER.indexOf(y.role));
+    const order = [...team].sort((x, y) => (DESK_ORDER.indexOf(x.role) + 1 || 99) - (DESK_ORDER.indexOf(y.role) + 1 || 99));
     for (const emp of order) {
       const ch = new Character(scene, emp, world.nav);
       const a = new Agent(ch, emp, O);
-      a.workTask = () => workTaskOf(a);
+      a.workTask = () => null;
       a.stayUntil = 0;
       if (emp.role === 'manager') a.desk = world.makeManagerDesk(emp.look.shirt);
-      else a.desk = world.makeDesk(world.openDeskSlots[slot++ % world.openDeskSlots.length], emp.role, emp.look.shirt);
+      else a.desk = world.makeDesk(world.openDeskSlots[slot++ % world.openDeskSlots.length], DESK_LOOK[emp.role] || emp.role, emp.look.shirt);
       a.desk.owner = a;
       agents.push(a); byId.set(emp.id, a);
       makeLabel(a);
     }
-    // sisa meja kosong untuk tambahan anggota tim
     for (let i = slot; i < Math.min(world.openDeskSlots.length, slot + 1); i++) { const d = world.makeDesk(world.openDeskSlots[i], 'empty', 0x8a90a0); paintEmpty(d); }
-    // posisi awal: semua di meja, kecuali di luar jam kerja (yang tidak punya tugas sudah pulang)
     for (const a of agents) {
       const s = a.desk.seat;
       a.ch.place(s.x, s.z, s.rot); a.ch.sitting = true; a.ch.seat = O.seatOf(a); a.ch.act = 'sit';
@@ -167,13 +160,20 @@ export function initOffice({ stage, onSelectEmployee }) {
       a.desk.chair.position.z = s.z + (a.desk.face === 's' ? -0.06 : 0.06);
       if (!shouldBeHere(a)) { a.away = true; a.ch.setVisible(false); a.ch.sitting = false; a.ch.seat = null; }
       a.setStatus(a.away ? 'Sudah pulang' : '');
-      // jeda awal acak supaya tidak semua orang langsung ngopi bersamaan
-      Object.assign(a.cooldown, { workBreak: rand(40, 160), coffee: rand(60, 260), sofa: rand(40, 200), window: rand(30, 160), stretch: rand(30, 120), chat: rand(60, 200), pingpong: rand(90, 300), huddle: rand(120, 400), tidyBoard: rand(60, 200), patrol: rand(90, 240) });
+      Object.assign(a.cooldown, { desk: rand(5, 40), workBreak: rand(60, 200), coffee: rand(60, 260), sofa: rand(40, 200), window: rand(30, 160), stretch: rand(30, 120), chat: rand(60, 200), pingpong: rand(90, 300), huddle: rand(120, 400), tidyBoard: rand(60, 200), patrol: rand(90, 240), vault: rand(60, 200) });
     }
     renderer.shadowMap.needsUpdate = true;
   }
 
-  /* ---------- skrip kerja ---------- */
+  /* ---------- kerja rutin per bagian ---------- */
+  const ROUTINE = {
+    manager: ['Membaca ringkasan bulan', 'Memantau sisa jatah', 'Meninjau laporan keuangan'],
+    planner: ['Memeriksa pemakaian anggaran', 'Menghitung sisa tiap pos', 'Merapikan rencana anggaran'],
+    treasurer: ['Mencocokkan buku kas', 'Memeriksa saldo sumber dana', 'Merapikan catatan pengeluaran'],
+    billing: ['Mengecek jadwal tagihan', 'Memeriksa cicilan berjalan', 'Mencocokkan tagihan kartu'],
+    savings: ['Menghitung progres tabungan', 'Membandingkan instrumen investasi', 'Memperbarui target tabungan'],
+    shopper: ['Menyusun daftar belanja', 'Membandingkan harga kebutuhan', 'Memeriksa split bill'],
+  };
   function decide(a) {
     if (a.away) {
       if (shouldBeHere(a)) {
@@ -183,22 +183,20 @@ export function initOffice({ stage, onSelectEmployee }) {
       return null;
     }
     if (!shouldBeHere(a)) return goHomeScript(a);
-    const wt = workTaskOf(a);
-    if (wt) {
-      if (!(a.cooldown.workBreak > simT) && Math.random() < 0.3) {
-        const b = workBreak(a);
-        if (b) { a.cooldown.workBreak = simT + rand(150, 300); return b; }
-      }
-      return { kind: 'work', name: 'work', status: 'Mengerjakan: ' + short(wt.title), steps: [S.sit(O.seatOf(a)), S.act(a.role === 'designer' && Math.random() < 0.5 ? 'think' : 'type', { dur: rand(20, 45), status: 'Mengerjakan: ' + short(wt.title) })] };
+    if (a.script === null && a.lastKind === 'work' && !(a.cooldown.workBreak > simT) && Math.random() < 0.35) {
+      const b = workBreak(a); if (b) { a.cooldown.workBreak = simT + rand(150, 320); a.lastKind = 'break'; return b; }
     }
-    const wait = waitingTaskOf(a);
-    if (wait) return { kind: 'work', name: 'waiting', status: 'Menunggu persetujuan Anda', steps: [S.sit(O.seatOf(a)), S.act('sit', { dur: 20, status: 'Menunggu persetujuan Anda: ' + short(wait.title, 28) })] };
-    if (a.role === 'treasurer' && fin.enabled && !(a.cooldown.vault > simT) && Math.random() < 0.25) { const v = vaultCheckScript(a); if (v) { a.cooldown.vault = simT + rand(240, 420); return v; } }
+    if (a.role === 'treasurer' && fin.enabled && !(a.cooldown.vault > simT) && Math.random() < 0.2) { const v = vaultCheckScript(a); if (v) { a.cooldown.vault = simT + rand(240, 420); return v; } }
+    if (!(a.cooldown.desk > simT) && Math.random() < 0.55) {
+      a.cooldown.desk = simT + rand(40, 110); a.lastKind = 'work';
+      const st = (ROUTINE[a.role] || ['Bekerja'])[(Math.random() * 3) | 0];
+      return { kind: 'work', name: 'routine', status: st, steps: [S.sit(O.seatOf(a)), S.act(Math.random() < 0.3 ? 'think' : 'type', { dur: rand(14, 30), status: st })] };
+    }
+    a.lastKind = 'idle';
     return chooseIdle(a, O, simT) || { kind: 'idle', name: 'desk', status: 'Di meja', steps: [S.sit(O.seatOf(a)), S.act('sit', { dur: rand(10, 20) })] };
   }
 
-  /* ---------- rehat sejenak saat task masih On Progress ---------- */
-  // Status task tidak berubah; ini hanya jeda singkat sebelum kembali mengetik.
+  /* ---------- rehat sejenak di sela kerja ---------- */
   function workBreak(a) {
     const P = world.POI, habits = a.emp.habits || [], opts = [];
     const add = (name, w, cd, make) => { if (!(a.cooldown['wb_' + name] > simT)) opts.push({ name, w, cd, make }); };
@@ -273,155 +271,11 @@ export function initOffice({ stage, onSelectEmployee }) {
     ] };
   }
 
-  function boardSpot(a) {
-    const spots = world.POI.boardWrite;
-    for (let i = 0; i < spots.length; i++) if (a.reserve('board' + i)) return spots[i];
-    return spots[1];
-  }
-
-  function writeScript(a, taskId) {
-    let spot;
-    return { kind: 'task', name: 'write', status: 'Menulis task baru ke papan', steps: [
-      S.call((ag) => (spot = boardSpot(ag))),
-      { start(ag) { this.done = false; ag.ch.walkTo(spot, () => (this.done = true)); }, tick() { return this.done; } },
-      { start(ag) { ag.ch.face(spot.rot); this.t = 0; }, tick(ag, dt) { return (this.t += dt) > 0.3; } },
-      S.act('write', { dur: 2.8, props: { marker: true }, status: 'Menulis task baru ke papan' }),
-      S.call(() => { visual.pendingWrite.delete(taskId); redrawBoard(); }),
-      S.status('Kembali ke meja'),
-    ] };
-  }
-  function pickScript(a, taskId) {
-    let spot;
-    return { kind: 'task', name: 'pick', status: 'Menuju papan task', steps: [
-      S.wait(() => !visual.pendingWrite.has(taskId), 40),
-      S.call((ag) => { spot = boardSpot(ag); ag.setStatus('Mengambil task dari papan'); }),
-      { start(ag) { this.done = false; ag.ch.walkTo(spot, () => (this.done = true)); }, tick() { return this.done; } },
-      { start(ag) { ag.ch.face(spot.rot); this.t = 0; }, tick(ag, dt) { return (this.t += dt) > 0.3; } },
-      S.act('take', { dur: 1.2 }),
-      S.call((ag) => { visual.pendingPick.delete(taskId); redrawBoard(); const t = taskById(taskId); if (t && t.status === 'in_progress') ag.ch.props({ paper: true }); }),
-      S.call((ag) => { const t = taskById(taskId); ag.setStatus(t ? 'Mulai mengerjakan: ' + short(t.title) : 'Kembali ke meja'); }),
-      S.sit(O.seatOf(a)),
-      S.call((ag) => ag.ch.props({})),
-    ] };
-  }
-  function presentScripts(taskId, lateMode) {
-    if (sessions.has(taskId)) return;
-    const t = taskById(taskId); if (!t) return;
-    const presenter = byId.get(t.assigneeId), mgr = agents.find((x) => x.role === 'manager');
-    if (!presenter) { visual.pendingDone.delete(taskId); return; }
-    const sess = { taskId, title: t.title, presenterReady: false, managerReady: !mgr, presentT: 0, finished: false };
-    sessions.set(taskId, sess);
-    const P = world.POI;
-    const done = () => { const x = taskById(taskId); return !x || x.status === 'done'; };
-    const remaining = () => { const x = taskById(taskId); return x && x.reviewUntil ? Math.max(0, (x.reviewUntil - api.now()) / 1000) : 0; };
-    presenter.enqueue({ kind: 'task', name: 'present', status: 'Menuju ruang meeting untuk presentasi', keepProps: false, steps: [
-      S.call((ag) => ag.ch.props({ laptop: true })),
-      S.walk(P.meetPresenter),
-      S.faceTo(P.meetCenter),
-      S.call((ag) => { sess.presenterReady = true; ag.ch.props({}); }),
-      S.act('present', { status: 'Presentasi ke Manager: ' + short(t.title, 28), lookAt: mgr ? mgr.ch.pos : null, max: 60,
-        onTick: (ag, dt) => { if (sess.managerReady) sess.presentT += dt; const total = Math.max(4, sess.presentT + remaining()); world.meetingScreen(sess.title, `${presenter.emp.name} → ${mgr ? mgr.emp.name : 'Manager'}`, sess.presentT / total); },
-        until: () => sess.managerReady && sess.presentT >= (lateMode ? 3 : 4) && done() }),
-      S.call((ag) => {
-        sess.finished = true; visual.pendingDone.delete(taskId); redrawBoard();
-        world.confetti(P.meetCenter.x, 1.2, P.meetCenter.z); ag.ch.cheer(); ag.setStatus('Task disetujui!');
-        world.meetingScreen(null);
-      }),
-      S.act('stand', { dur: 1.8 }),
-    ], onEnd: () => { sessions.delete(taskId); if (!sess.finished) { visual.pendingDone.delete(taskId); redrawBoard(); world.meetingScreen(null); } } });
-    if (mgr) {
-      const seat = P.meetSeats[0];
-      mgr.enqueue({ kind: 'task', name: 'review', status: 'Menuju ruang meeting', steps: [
-        S.sit({ seat, front: { x: seat.x, z: seat.z + 0.75 } }),
-        S.call(() => (sess.managerReady = true)),
-        S.act('listen', { status: 'Mendengarkan presentasi ' + presenter.emp.name, lookAt: presenter.ch.pos, until: () => sess.finished || !sessions.has(taskId), max: 70 }),
-        S.call((ag) => { ag.setStatus('Menyetujui task'); }),
-        S.act('sit', { dur: 1.2 }),
-      ] });
-    }
-  }
-
-  /* ---------- selisih data → animasi ---------- */
-  let teamBuilt = false;
-  api.on('state', (next, prev) => stateHandler(next, prev));
-  function stateHandler(next, prev) {
-    if (!next || !next.team) return;
-    if (!teamBuilt) { buildTeam(next.team); teamBuilt = true; prev = null; pollFinance(); }
-    const prevMap = new Map(((prev && prev.tasks) || []).map((t) => [t.id, t]));
-    const coord = agents.find((a) => a.role === 'coordinator') || agents[0];
-    if (!prev) {
-      for (const t of next.tasks) if (t.status === 'review' && t.reviewUntil && t.reviewUntil > api.now()) { visual.pendingDone.add(t.id); presentScripts(t.id, false); }
-    } else {
-      for (const t of next.tasks) {
-        const old = prevMap.get(t.id);
-        if (!old) {
-          visual.pendingWrite.add(t.id);
-          ensureHere(coord); coord.enqueue(writeScript(coord, t.id));
-          if (t.status === 'in_progress' || t.status === 'review') queuePick(t);
-          continue;
-        }
-        if (old.status !== t.status || old.assigneeId !== t.assigneeId) {
-          if (t.status === 'in_progress' && (old.status === 'open' || old.assigneeId !== t.assigneeId)) queuePick(t);
-          if (t.status === 'review' && t.reviewUntil && !(old.status === 'review' && old.reviewUntil)) { visual.pendingDone.add(t.id); const a = byId.get(t.assigneeId); if (a) ensureHere(a); ensureHere(agents.find((x) => x.role === 'manager')); presentScripts(t.id, false); }
-          if (t.status === 'done' && old.status === 'in_progress') { const a = byId.get(t.assigneeId); if (a && !a.away) { visual.pendingDone.add(t.id); presentScripts(t.id, true); } }
-          if (t.status === 'open') { visual.pendingPick.delete(t.id); }
-        }
-      }
-      for (const id of prevMap.keys()) if (!next.tasks.some((t) => t.id === id)) { visual.pendingWrite.delete(id); visual.pendingPick.delete(id); visual.pendingDone.delete(id); }
-    }
-    redrawBoard();
-  }
-  function queuePick(t) {
-    const a = byId.get(t.assigneeId); if (!a) return;
-    visual.pendingPick.add(t.id);
-    ensureHere(a); a.enqueue(pickScript(a, t.id));
-  }
-  function ensureHere(a) {
-    if (!a) return;
-    a.stayUntil = simT + 90;
-    if (a.away && !a.queue.some((s) => s.name === 'arrive') && !(a.script && a.script.name === 'arrive')) { a.arriveAt = 0; a.queue.unshift(arriveScript(a)); }
-    if (a.script && a.script.name === 'home') { a.abort(); a.away = false; a.ch.setVisible(true); }
-  }
-
-  function redrawBoard() {
-    const s = api.state; if (!s) return;
-    const today = new Date().toDateString();
-    const open = [], prog = [], done = [];
-    for (const t of s.tasks) {
-      if (visual.pendingWrite.has(t.id)) continue;
-      if (visual.pendingDone.has(t.id)) { prog.push(t); continue; }
-      if (t.status === 'open' || visual.pendingPick.has(t.id)) open.push(t);
-      else if (t.status === 'in_progress' || t.status === 'review') prog.push(t);
-      else if (t.status === 'done' && t.doneAt && new Date(t.doneAt).toDateString() === today) done.push(t);
-    }
-    const prioRank = { high: 0, medium: 1, low: 2 };
-    open.sort((x, y) => prioRank[x.priority] - prioRank[y.priority] || x.createdAt - y.createdAt);
-    done.sort((x, y) => y.doneAt - x.doneAt);
-    world.drawBoard([open, prog, done], s.projects, s.team);
-  }
-
-  /* ---------- keuangan (Arus) → brankas dan Bendahara ---------- */
-  const rupiah = (v) => (v < 0 ? '−Rp ' : 'Rp ') + Math.abs(Math.round(v)).toLocaleString('id-ID');
-  const signed = (v) => (v > 0 ? '+' : '') + rupiah(v);
-  const shortRp = (v) => { const a = Math.abs(v); return a >= 1e9 ? (a / 1e9).toLocaleString('id-ID', { maximumFractionDigits: 1 }) + ' M' : a >= 1e6 ? (a / 1e6).toLocaleString('id-ID', { maximumFractionDigits: 1 }) + ' jt' : a >= 1e3 ? Math.round(a / 1e3) + ' rb' : String(a); };
-  const fin = { enabled: false, data: null, shown: new Map(), target: new Map(), seen: new Set(), first: true, unit: 100000, color: '#d8534f', labels: [], legend: null, counts: [], want: [], animT: 0, current: null, timer: 0 };
+  /* ---------- keuangan (Arus) → brankas dan kegiatan per karyawan ---------- */
+  const fin = { enabled: false, data: null, shown: new Map(), target: new Map(), seen: new Set(), first: true, unit: 100000, color: '#d8534f', labels: [], legend: null, counts: [], want: [], animT: 0, sigs: null, prevPockets: [], prevMasuk: null };
   const NOTE = [[1e4, '#9b6fb5'], [2e4, '#5fa36b'], [5e4, '#3f7fc4'], [1e5, '#d8534f']];
-  const treasurer = () => agents.find((x) => x.role === 'treasurer');
+  const vaultPockets = () => (fin.data ? fin.data.pockets.filter((p) => !p.credit).slice(0, 8) : []);
 
-  async function pollFinance() {
-    clearTimeout(fin.timer);
-    let next = 15000;
-    if (document.visibilityState === 'hidden') next = 5000;
-    else try {
-      const r = await fetch('/api/finance', { headers: api.headers(), cache: 'no-store' });
-      const j = r.ok ? await r.json() : null;
-      if (r.status === 401) next = 30000;
-      else if (j && j.enabled === false) { fin.enabled = false; showVault(false); if (j.error) console.warn('[Keuangan]', j.error); next = 120000; }
-      else if (j && j.error) { console.warn('[Keuangan]', j.error); next = 60000; }
-      else if (j) handleFinance(j);
-    } catch { next = 30000; }
-    fin.timer = setTimeout(pollFinance, next);
-  }
   function chooseUnit(pockets) {
     const max = Math.max(0, ...pockets.map((p) => p.saldo));
     const steps = [1e4, 2e4, 5e4]; for (let e = 5; e < 13; e++) steps.push(10 ** e, 2 * 10 ** e, 5 * 10 ** e);
@@ -430,13 +284,13 @@ export function initOffice({ stage, onSelectEmployee }) {
   }
   const bundlesFor = (v) => (v > 0 ? Math.min(120, Math.max(1, Math.round(v / fin.unit))) : 0);
   function showVault(on) {
-    world.showVaultSlots(on && fin.data ? Math.min(8, fin.data.pockets.length) : 0);
+    world.showVaultSlots(on ? vaultPockets().length : 0);
     if (!on) { world.setVault([], fin.color); fin.counts = []; fin.want = []; }
-    for (const L of fin.labels) L.el.classList.toggle('hide', !on);
+    for (const L of fin.labels) L.el.classList.toggle('hide', !on || L.hidden);
     if (fin.legend) fin.legend.el.classList.toggle('hide', !on);
   }
   function syncLabels() {
-    const ps = fin.data.pockets.slice(0, 8);
+    const ps = vaultPockets();
     while (fin.labels.length < ps.length) {
       const el = document.createElement('div'); el.className = 'mtag'; el.innerHTML = '<b></b><span class="amt"></span>'; labels.appendChild(el);
       fin.labels.push({ el, nm: el.querySelector('b'), amt: el.querySelector('.amt'), idx: fin.labels.length, slot: world.vaultSlots[fin.labels.length], count: 0, hidden: false, last: null });
@@ -448,10 +302,10 @@ export function initOffice({ stage, onSelectEmployee }) {
       if (L.last !== v) { if (L.last !== null) { L.el.classList.add('flash'); setTimeout(() => L.el.classList.remove('flash'), 1400); } L.last = v; L.amt.textContent = rupiah(v); L.el.classList.toggle('neg', v < 0); }
     });
     if (!fin.legend) { const el = document.createElement('div'); el.className = 'mtag legend'; labels.appendChild(el); fin.legend = { el, hidden: false, legendOnly: true, slot: { x: 13.35, z: -2.55 } }; }
-    fin.legend.el.textContent = '1 ikat ≈ Rp ' + shortRp(fin.unit);
+    fin.legend.el.innerHTML = '1 ikat ≈ <span class="amt">Rp ' + shortRp(fin.unit) + '</span>';
   }
   function refreshVault() {
-    const ps = fin.data.pockets.slice(0, 8);
+    const ps = vaultPockets();
     fin.want = ps.map((p) => bundlesFor(fin.shown.get(p.id) ?? p.saldo));
     fin.labels.forEach((L, i) => { L.count = fin.want[i] || 0; });
     syncLabels();
@@ -468,237 +322,247 @@ export function initOffice({ stage, onSelectEmployee }) {
     fin.counts.length = fin.want.length;
     if (changed) world.setVault(fin.counts, fin.color);
   }
-  function handleFinance(j) {
-    const firstTime = fin.first;
-    fin.enabled = true; fin.data = j;
-    const ps = j.pockets.slice(0, 8);
-    const oldUnit = fin.unit; chooseUnit(j.pockets);
-    if (oldUnit !== fin.unit) fin.counts = [];
-    for (const p of ps) if (!fin.shown.has(p.id)) fin.shown.set(p.id, p.saldo);
-    showVault(true);
-    const fresh = j.events.filter((e) => !fin.seen.has(e.id));
-    j.events.forEach((e) => fin.seen.add(e.id));
-    const prevSigs = fin.sigs, prevPockets = fin.prevPockets || [];
-    fin.sigs = j.sigs || null; fin.prevPockets = ps.map((p) => ({ id: p.id, name: p.name }));
-    if (firstTime) { fin.first = false; refreshVault(); return; }
-    // perubahan tanpa catatan waktu (edit / hapus tagihan, ganti nama atau saldo awal sumber dana)
-    if (prevSigs && j.sigs) {
-      if (prevSigs.bills !== j.sigs.bills && !fresh.some((e) => e.type.startsWith('bill'))) fresh.push({ id: 'sb' + j.sigs.bills, type: 'bill-edit', label: 'Memperbarui data tagihan', amount: 0 });
-      if (prevSigs.pockets !== j.sigs.pockets && !fresh.some((e) => ['transfer', 'adjust', 'pocket-new'].includes(e.type))) {
-        const renamed = ps.find((p) => { const o = prevPockets.find((x) => x.id === p.id); return !o || o.name !== p.name; });
-        fresh.push({ id: 'sp' + j.sigs.pockets, type: 'pocket-edit', label: renamed ? 'Sumber dana: ' + renamed.name : 'Memperbarui sumber dana', amount: 0, pocketId: renamed ? renamed.id : null });
-      }
-    }
-    const changed = ps.filter((p) => fin.shown.get(p.id) !== p.saldo && fin.target.get(p.id) !== p.saldo);
-    changed.forEach((p) => fin.target.set(p.id, p.saldo));
-    refreshVault();
-    if (!fresh.length && !changed.length) return;
-    const t = treasurer();
-    if (!t) { changed.forEach((p) => { fin.shown.set(p.id, p.saldo); fin.target.delete(p.id); }); refreshVault(); return; }
-    ensureHere(t);
-    t.enqueue(financeScript(t, fresh.reverse().slice(-5), changed));
-  }
   function applyPocket(id) {
     const p = fin.data && fin.data.pockets.find((x) => x.id === id); if (!p) return;
     fin.shown.set(id, p.saldo); fin.target.delete(id); refreshVault();
   }
-  function financeScript(a, events, changed) {
-    const steps = [S.sit(O.seatOf(a))];
-    const verb = (e) => (e.type.startsWith('bill') ? 'Tagihan · ' : e.type.startsWith('pocket') || e.type === 'transfer' || e.type === 'adjust' ? 'Sumber dana · ' : 'Mencatat: ');
-    for (const e of events) steps.push(S.call(() => (fin.current = e.id)), S.act('type', { dur: rand(2.4, 3.4), status: verb(e) + short(e.label, 26) + (e.amount ? ' ' + signed(e.amount) : '') }));
-    if (!events.length) steps.push(S.act('type', { dur: 2, status: 'Mencocokkan saldo dengan Arus' }));
-    steps.push(S.call(() => (fin.current = null)));
-    const ps = fin.data.pockets.slice(0, 8);
-    // tagihan: bukti dimasukkan ke lemari besi
-    const billEv = events.filter((e) => e.type.startsWith('bill'));
-    if (billEv.length && world.safeFront) {
-      const sf = world.safeFront, e0 = billEv[0];
-      steps.push(
-        S.call((ag) => { ag.ch.props({ paper: true }); ag.setStatus(e0.type === 'bill-paid' ? 'Mengarsipkan bukti lunas' : 'Mengarsipkan data tagihan'); }),
-        S.walk(sf), S.face(sf.rot), S.act('take', { dur: 1.3 }),
-        S.call((ag) => { ag.ch.props({}); ag.setStatus(e0.type === 'bill-paid' ? short(e0.label, 30) + ' ✓' : 'Data tagihan diperbarui'); }),
-        S.act('stand', { dur: 0.7 }),
-      );
+
+  // Perubahan tanpa waktu dibuat (edit/hapus) dideteksi lewat sidik jari data dari server.
+  function syntheticEvents(f, fresh, prevSigs) {
+    const out = [], has = (pred) => fresh.some(pred);
+    if (!prevSigs || !f.sigs) return out;
+    const ch = (k) => prevSigs[k] !== f.sigs[k];
+    if (ch('bills') && !has((e) => e.who === 'billing')) out.push({ id: 'sb' + f.sigs.bills, type: 'bill-edit', who: 'billing', label: 'Data tagihan diperbarui', amount: 0 });
+    if (ch('pockets') && !has((e) => ['transfer', 'adjust', 'pocket-new'].includes(e.type))) {
+      const renamed = f.pockets.find((p) => { const o = fin.prevPockets.find((x) => x.id === p.id); return !o || o.name !== p.name; });
+      out.push({ id: 'sp' + f.sigs.pockets, type: 'pocket-edit', who: 'treasurer', label: renamed ? 'Sumber dana: ' + renamed.name : 'Sumber dana diperbarui', amount: 0, pocketId: renamed ? renamed.id : null });
     }
-    // sumber dana baru / diubah tanpa perubahan saldo: periksa alasnya di brankas
-    for (const e of events.filter((x) => (x.type === 'pocket-new' || x.type === 'pocket-edit') && x.pocketId && !changed.some((p) => p.id === x.pocketId))) {
-      const i = ps.findIndex((p) => p.id === e.pocketId), slot = world.vaultSlots[i]; if (!slot) continue;
-      steps.push(S.walk(slot.front), S.face(slot.front.rot), S.act('listenStand', { dur: 2.2, status: 'Memeriksa sumber dana ' + ps[i].name }));
+    if (ch('budget')) out.push({ id: 'sbg' + f.sigs.budget, type: 'budget-edit', who: 'planner', label: 'Anggaran diperbarui', amount: 0 });
+    if (ch('goals') && !has((e) => e.who === 'savings')) out.push({ id: 'sg' + f.sigs.goals, type: 'goal-edit', who: 'savings', label: 'Target tabungan diperbarui', amount: 0 });
+    if (ch('needs') && !has((e) => e.who === 'shopper')) out.push({ id: 'sn' + f.sigs.needs, type: 'need-edit', who: 'shopper', label: 'List kebutuhan diperbarui', amount: 0 });
+    if (ch('income')) {
+      const d = fin.prevMasuk == null ? 0 : f.summary.masuk - fin.prevMasuk;
+      out.push({ id: 'si' + f.sigs.income, type: d > 0 ? 'income' : 'income-edit', who: 'manager', label: d > 0 ? 'Pemasukan masuk' : 'Pemasukan diperbarui', amount: d > 0 ? d : 0 });
     }
-    for (const p of changed) {
-      const i = ps.indexOf(p), slot = world.vaultSlots[i]; if (!slot) continue;
-      const delta = p.saldo - (fin.shown.get(p.id) ?? p.saldo), add = delta > 0;
-      steps.push(
-        S.call((ag) => { ag.ch.props({ paper: add }); ag.setStatus((add ? 'Menyimpan ' : 'Mengambil ') + rupiah(Math.abs(delta)) + (add ? ' ke ' : ' dari ') + p.name); }),
-        S.walk(slot.front), S.face(slot.front.rot),
-        S.act('take', { dur: 1.4 }),
-        S.call((ag) => { applyPocket(p.id); ag.ch.props({ paper: !add }); ag.setStatus('Saldo ' + p.name + ': ' + rupiah(p.saldo)); }),
-        S.act('stand', { dur: 0.8 }),
-      );
-    }
-    return { kind: 'task', name: 'finance', status: 'Ada catatan keuangan baru', steps,
-      onEnd: () => { fin.current = null; for (const p of changed) if (fin.target.has(p.id)) applyPocket(p.id); } };
-  }
-  function vaultCheckScript(a) {
-    if (!fin.data || !fin.data.pockets.length) return null;
-    const i = (Math.random() * Math.min(8, fin.data.pockets.length)) | 0, slot = world.vaultSlots[i], p = fin.data.pockets[i];
-    return { kind: 'idle', name: 'vault', status: 'Menghitung uang di brankas', steps: [S.walk(slot.front), S.face(slot.front.rot), S.act('listenStand', { dur: rand(4, 6), status: 'Menghitung uang ' + p.name })] };
-  }
-  function drawLedger(g, a) {
-    const w = 256, h = 160, j = fin.data;
-    g.fillStyle = '#8a92a8'; g.font = '600 10px sans-serif'; g.fillText('buku kas · Arus', 46, 11);
-    if (!fin.enabled || !j) { g.fillStyle = '#e6e8ef'; g.font = '700 14px sans-serif'; g.fillText('Belum terhubung ke Arus', 34, 84); return; }
-    const total = j.pockets.reduce((t, p) => t + p.saldo, 0);
-    g.fillStyle = '#8a92a8'; g.font = '600 10px sans-serif'; g.fillText('TOTAL SALDO', 12, 32);
-    g.fillStyle = '#ffd166'; g.font = '700 17px sans-serif'; g.fillText(rupiah(total), 12, 51);
-    g.fillStyle = '#8a92a8'; g.font = '500 10px sans-serif'; g.fillText('keluar bln ini ' + rupiah(j.monthSpent || 0), 132, 32);
-    if (j.billsDue != null) { g.fillStyle = j.billsDue ? '#ffb27a' : '#5cc184'; g.fillText(j.billsDue ? j.billsDue + ' tagihan belum lunas' : 'tagihan beres ✓', 132, 48); }
-    g.font = '600 11px sans-serif';
-    j.events.slice(0, 6).forEach((e, i) => {
-      const y = 72 + i * 15, hot = fin.current === e.id;
-      if (hot) { g.fillStyle = 'rgba(255,209,102,.18)'; g.fillRect(6, y - 11, w - 12, 14); }
-      g.fillStyle = hot ? '#ffffff' : '#c9cfdd'; g.fillText(short(e.label, 20), 12, y);
-      const s = e.amount ? signed(e.amount) : e.type === 'bill-paid' ? 'lunas' : ''; g.fillStyle = e.amount < 0 ? '#ff8a8a' : '#5cc184'; g.fillText(s, w - 12 - g.measureText(s).width, y);
-    });
+    return out;
   }
 
-  /* ---------- monitor ---------- */
+  function handleFinance(f) {
+    if (!f || !f.enabled) { fin.enabled = false; fin.data = null; showVault(false); return; }
+    const firstTime = fin.first;
+    fin.enabled = true; fin.data = f;
+    const ps = vaultPockets();
+    const oldUnit = fin.unit; chooseUnit(ps);
+    if (oldUnit !== fin.unit) fin.counts = [];
+    for (const p of ps) if (!fin.shown.has(p.id)) fin.shown.set(p.id, p.saldo);
+    showVault(true);
+    const fresh = f.events.filter((e) => !fin.seen.has(e.id));
+    f.events.forEach((e) => fin.seen.add(e.id));
+    const prevSigs = fin.sigs;
+    if (!firstTime) fresh.push(...syntheticEvents(f, fresh, prevSigs));
+    fin.sigs = f.sigs; fin.prevPockets = f.pockets.map((p) => ({ id: p.id, name: p.name })); fin.prevMasuk = f.summary.masuk;
+    if (firstTime) { fin.first = false; refreshVault(); onFinanceState(f, true); return; }
+    const changed = ps.filter((p) => fin.shown.get(p.id) !== p.saldo && fin.target.get(p.id) !== p.saldo);
+    changed.forEach((p) => fin.target.set(p.id, p.saldo));
+    refreshVault();
+    routeEvents(fresh.reverse(), changed);
+    onFinanceState(f, false);
+  }
+
+  // Setiap kegiatan diurus karyawan yang memegang bagiannya; pengeluaran juga dicatat Perencana Anggaran ke posnya.
+  function routeEvents(events, changed) {
+    const groups = new Map();
+    const push = (role, e) => { if (!groups.has(role)) groups.set(role, []); groups.get(role).push(e); };
+    for (const e of events) {
+      push(e.who, e);
+      if (e.type === 'expense' && e.budgetItemId) push('planner', { ...e, id: e.id + ':p', type: 'budget-use' });
+    }
+    if (changed.length && !groups.has('treasurer')) groups.set('treasurer', []);
+    for (const [role, evs] of groups) {
+      const a = byRole(role);
+      if (!a) { if (role === 'treasurer') changed.forEach((p) => applyPocket(p.id)); continue; }
+      ensureHere(a);
+      a.enqueue(roleScript(a, evs.slice(-5), role === 'treasurer' ? changed : []));
+    }
+  }
+
+  const VERB = {
+    expense: (e) => 'Mencatat: ' + short(e.label, 24) + ' ' + signed(e.amount),
+    'budget-use': (e) => 'Pos anggaran: ' + short(e.label, 22) + ' ' + signed(e.amount),
+    'budget-edit': () => 'Menyusun ulang anggaran',
+    'bill-pay': (e) => short(e.label, 26) + ' ' + signed(e.amount),
+    'bill-paid': (e) => short(e.label, 30),
+    'bill-new': (e) => short(e.label, 30),
+    'bill-edit': () => 'Memperbarui data tagihan',
+    saving: (e) => short(e.label, 24) + ' ' + rupiah(Math.abs(e.amount)),
+    'goal-edit': () => 'Memperbarui target tabungan',
+    need: (e) => short(e.label, 24) + ' ' + rupiah(Math.abs(e.amount)),
+    'need-edit': () => 'Memperbarui list kebutuhan',
+    split: (e) => short(e.label, 26),
+    transfer: (e) => short(e.label, 28),
+    adjust: (e) => short(e.label, 28),
+    'pocket-new': (e) => short(e.label, 30),
+    'pocket-edit': (e) => short(e.label, 30),
+    income: (e) => 'Pemasukan masuk ' + signed(e.amount),
+    'income-edit': () => 'Memeriksa pemasukan bulan ini',
+  };
+  function roleScript(a, events, changed) {
+    const steps = [S.sit(O.seatOf(a))];
+    for (const e of events) steps.push(S.call((ag) => (ag.curEv = e.id)), S.act('type', { dur: rand(2.4, 3.4), status: (VERB[e.type] || ((x) => short(x.label, 30)))(e) }));
+    if (!events.length) steps.push(S.act('type', { dur: 2, status: 'Mencocokkan saldo dengan Arus' }));
+    steps.push(S.call((ag) => (ag.curEv = null)));
+    steps.push(...followUp(a, events, changed));
+    return { kind: 'task', name: 'finance', status: 'Ada kegiatan baru di Arus', steps,
+      onEnd: (ag) => { ag.curEv = null; for (const p of changed) if (fin.target.has(p.id)) applyPocket(p.id); } };
+  }
+
+  // Langkah lanjutan per peran (objek kantor). Tahap berikutnya menambah objek untuk peran lain.
+  function followUp(a, events, changed) {
+    const steps = [], ps = vaultPockets();
+    if (a.role === 'treasurer') {
+      for (const e of events.filter((x) => (x.type === 'pocket-new' || x.type === 'pocket-edit') && x.pocketId && !changed.some((p) => p.id === x.pocketId))) {
+        const i = ps.findIndex((p) => p.id === e.pocketId), slot = world.vaultSlots[i]; if (!slot || i < 0) continue;
+        steps.push(S.walk(slot.front), S.face(slot.front.rot), S.act('listenStand', { dur: 2.2, status: 'Memeriksa sumber dana ' + ps[i].name }));
+      }
+      for (const p of changed) {
+        const i = ps.indexOf(p), slot = world.vaultSlots[i]; if (!slot || i < 0) continue;
+        const delta = p.saldo - (fin.shown.get(p.id) ?? p.saldo), add = delta > 0;
+        steps.push(
+          S.call((ag) => { ag.ch.props({ paper: add }); ag.setStatus((add ? 'Menyimpan ' : 'Mengambil ') + rupiah(Math.abs(delta)) + (add ? ' ke ' : ' dari ') + p.name); }),
+          S.walk(slot.front), S.face(slot.front.rot), S.act('take', { dur: 1.4 }),
+          S.call((ag) => { applyPocket(p.id); ag.ch.props({ paper: !add }); ag.setStatus('Saldo ' + p.name + ': ' + rupiah(p.saldo)); }),
+          S.act('stand', { dur: 0.8 }),
+        );
+      }
+    }
+    if (a.role === 'manager' && events.some((e) => e.type === 'income')) {
+      steps.push(S.call((ag) => { ag.ch.cheer(); ag.setStatus('Pemasukan masuk!'); }), S.act('sit', { dur: 1.5 }));
+    }
+    return steps;
+  }
+  function vaultCheckScript(a) {
+    const ps = vaultPockets(); if (!ps.length) return null;
+    const i = (Math.random() * ps.length) | 0, slot = world.vaultSlots[i], p = ps[i];
+    return { kind: 'idle', name: 'vault', status: 'Menghitung uang di brankas', steps: [S.walk(slot.front), S.face(slot.front.rot), S.act('listenStand', { dur: rand(4, 6), status: 'Menghitung uang ' + p.name })] };
+  }
+  // dipanggil setiap snapshot baru; tahap berikutnya memakainya untuk objek kantor dan status Aman/Waspada/Kritis
+  function onFinanceState(f, first) {}
+
+
+  /* ---------- data → kantor ---------- */
+  let teamBuilt = false;
+  api.on('state', (next) => stateHandler(next));
+  function stateHandler(next) {
+    if (!next || !next.team) return;
+    if (!teamBuilt) { buildTeam(next.team); teamBuilt = true; }
+    handleFinance(next.finance);
+  }
+  function ensureHere(a) {
+    if (!a) return;
+    a.stayUntil = simT + 90;
+    if (a.away && !a.queue.some((s) => s.name === 'arrive') && !(a.script && a.script.name === 'arrive')) { a.arriveAt = 0; a.queue.unshift(arriveScript(a)); }
+    if (a.script && a.script.name === 'home') { a.abort(); a.away = false; a.ch.setVisible(true); }
+  }
+
+  /* ---------- monitor: setiap karyawan membuka bagian Arus miliknya ---------- */
+  const hidden = () => document.body.classList.contains('blur');
+  const money = (v) => (hidden() ? 'Rp •••' : rupiah(v));
+  const pctOf = (a, b) => (b > 0 ? a / b : 0);
   function paintEmpty(d) {
     const g = d.tex.userData.g; g.fillStyle = '#0b0e17'; g.fillRect(0, 0, 256, 160); g.fillStyle = '#39415c'; g.font = '700 18px sans-serif'; g.fillText('Meja kosong', 72, 86); d.tex.needsUpdate = true;
+  }
+  function row(g, y, left, right, color, hot) {
+    if (hot) { g.fillStyle = 'rgba(255,209,102,.18)'; g.fillRect(6, y - 11, 244, 14); }
+    g.font = '600 11px sans-serif'; g.fillStyle = hot ? '#ffffff' : '#c9cfdd'; g.fillText(short(left, 22), 12, y);
+    g.fillStyle = color || '#c9cfdd'; g.fillText(right, 244 - g.measureText(right).width, y);
+  }
+  function bar(g, x, y, w, p, color) {
+    g.fillStyle = '#262d3d'; g.fillRect(x, y, w, 5);
+    g.fillStyle = color; g.fillRect(x, y, w * Math.max(0, Math.min(1, p)), 5);
+  }
+  const SCREEN_TITLE = { manager: 'ringkasan · Arus', planner: 'anggaran · Arus', treasurer: 'buku kas · Arus', billing: 'tagihan · Arus', savings: 'tabungan · Arus', shopper: 'kebutuhan · Arus' };
+  function drawScreen(g, a, f) {
+    const w = 256, hot = (e) => a.curEv && (a.curEv === e.id || a.curEv.startsWith(e.id));
+    g.fillStyle = '#8a92a8'; g.font = '600 10px sans-serif'; g.fillText(SCREEN_TITLE[a.role] || 'Arus', 46, 11);
+    if (!f) { g.fillStyle = '#e6e8ef'; g.font = '700 14px sans-serif'; g.fillText('Belum terhubung ke Arus', 34, 84); return; }
+    const S = f.summary;
+    if (a.role === 'manager') {
+      const lv = f.status.level, col = lv === 'kritis' ? '#ff8a80' : lv === 'waspada' ? '#ffb27a' : '#5cc184';
+      g.fillStyle = col; g.font = '800 15px sans-serif'; g.fillText('STATUS: ' + lv.toUpperCase(), 12, 36);
+      g.fillStyle = '#8a92a8'; g.font = '600 10px sans-serif'; g.fillText('SISA JATAH', 12, 60); g.fillText('AMAN HARI INI', 136, 60);
+      g.fillStyle = '#ffd166'; g.font = '700 15px sans-serif'; g.fillText(money(S.sisaJatah), 12, 78); g.fillText(money(S.safeToday), 136, 78);
+      g.fillStyle = '#c9cfdd'; g.font = '500 10px sans-serif'; g.fillText(`${S.hariSisa} hari lagi`, 12, 92); g.fillText('terpakai ' + money(S.spentToday), 136, 92);
+      f.status.reasons.slice(0, 3).forEach((r, i) => { g.fillStyle = '#ffb27a'; g.font = '500 10px sans-serif'; g.fillText('• ' + short(r, 40), 12, 112 + i * 14); });
+      return;
+    }
+    if (a.role === 'treasurer') {
+      const total = f.pockets.filter((p) => !p.credit).reduce((t, p) => t + p.saldo, 0);
+      g.fillStyle = '#8a92a8'; g.font = '600 10px sans-serif'; g.fillText('TOTAL SALDO', 12, 32);
+      g.fillStyle = '#ffd166'; g.font = '700 17px sans-serif'; g.fillText(money(total), 12, 51);
+      g.fillStyle = '#8a92a8'; g.font = '500 10px sans-serif'; g.fillText('keluar bln ini ' + money(S.spent), 140, 32);
+      f.events.filter((e) => e.who === 'treasurer').slice(0, 6).forEach((e, i) => row(g, 72 + i * 15, e.label, e.amount ? (hidden() ? '•••' : signed(e.amount)) : '', e.amount < 0 ? '#ff8a8a' : '#5cc184', hot(e)));
+      return;
+    }
+    if (a.role === 'planner') {
+      const items = f.budget.filter((b) => b.grp === 'kebutuhan' || b.grp === 'gaya_hidup').slice(0, 6);
+      if (!items.length) { g.fillStyle = '#e6e8ef'; g.font = '600 12px sans-serif'; g.fillText('Anggaran bulan ini belum diisi', 30, 84); return; }
+      items.forEach((b, i) => {
+        const y = 32 + i * 21, p = pctOf(b.spent, b.amount), hotRow = a.curEv && f.events.some((e) => e.budgetItemId === b.id && a.curEv.startsWith(e.id));
+        if (hotRow) { g.fillStyle = 'rgba(255,209,102,.18)'; g.fillRect(6, y - 11, 244, 21); }
+        g.fillStyle = '#c9cfdd'; g.font = '600 10.5px sans-serif'; g.fillText(short(b.label, 20), 12, y);
+        const t = Math.round(p * 100) + '%'; g.fillStyle = p >= 1 ? '#ff8a80' : p >= 0.8 ? '#ffb27a' : '#9aa3b8'; g.fillText(t, 244 - g.measureText(t).width, y);
+        bar(g, 12, y + 4, 232, p, p >= 1 ? '#e05a4f' : p >= 0.8 ? '#e3a14a' : '#5cc184');
+      });
+      return;
+    }
+    if (a.role === 'billing') {
+      const C = { lunas: '#5cc184', terlambat: '#ff8a80', hari_ini: '#ffb27a', besok: '#ffd166', nanti: '#9aa3b8', dilewati: '#5b6276' };
+      const L = { lunas: 'lunas', terlambat: 'telat', hari_ini: 'hari ini', besok: 'besok', nanti: '', dilewati: 'lewati' };
+      f.bills.slice(0, 8).forEach((b, i) => row(g, 32 + i * 15, `${b.dueDay} · ${b.name}`, L[b.status] || (hidden() ? '•••' : shortRp(b.amount)), C[b.status], a.curEv && f.events.some((e) => e.billId === b.id && a.curEv === e.id)));
+      if (!f.bills.length) { g.fillStyle = '#e6e8ef'; g.font = '600 12px sans-serif'; g.fillText('Tidak ada tagihan bulan ini', 40, 84); }
+      return;
+    }
+    if (a.role === 'savings') {
+      f.goals.slice(0, 5).forEach((x, i) => {
+        const y = 32 + i * 24, p = pctOf(x.saldo, x.target), hotRow = a.curEv && f.events.some((e) => e.goalId === x.id && a.curEv === e.id);
+        if (hotRow) { g.fillStyle = 'rgba(255,209,102,.18)'; g.fillRect(6, y - 11, 244, 23); }
+        g.fillStyle = '#c9cfdd'; g.font = '600 10.5px sans-serif'; g.fillText(short(x.name, 20), 12, y);
+        const t = x.target ? Math.round(p * 100) + '%' : money(x.saldo); g.fillStyle = '#9aa3b8'; g.fillText(t, 244 - g.measureText(t).width, y);
+        bar(g, 12, y + 5, 232, p, p >= 1 ? '#ffd166' : '#7c8cff');
+      });
+      if (!f.goals.length) { g.fillStyle = '#e6e8ef'; g.font = '600 12px sans-serif'; g.fillText('Belum ada target tabungan', 44, 84); }
+      return;
+    }
+    if (a.role === 'shopper') {
+      const list = [...f.needs].sort((x, y) => (x.bought - y.bought) || (y.due - x.due)).slice(0, 8);
+      list.forEach((x, i) => {
+        const y = 32 + i * 15;
+        g.strokeStyle = x.bought ? '#5cc184' : x.due ? '#ffb27a' : '#5b6276'; g.lineWidth = 1.5; g.strokeRect(12, y - 9, 9, 9);
+        if (x.bought) { g.fillStyle = '#5cc184'; g.fillRect(14, y - 7, 5, 5); }
+        g.fillStyle = x.bought ? '#6b7387' : '#c9cfdd'; g.font = '600 11px sans-serif'; g.fillText(short(x.name, 20), 28, y);
+        const t = x.bought ? 'dibeli' : x.due ? 'beli!' : (hidden() ? '•••' : shortRp(x.est)); g.fillStyle = x.due && !x.bought ? '#ffb27a' : '#9aa3b8'; g.fillText(t, 244 - g.measureText(t).width, y);
+      });
+      if (!list.length) { g.fillStyle = '#e6e8ef'; g.font = '600 12px sans-serif'; g.fillText('List kebutuhan kosong', 56, 84); }
+    }
   }
   function paintMonitor(a) {
     const d = a.desk, g = d.tex.userData.g, w = 256, h = 160, ac = a.emp.look.shirt;
     const atDesk = a.ch.sitting && a.ch.seat && a.ch.seat.desk === d && !a.away;
     g.fillStyle = '#0b0e17'; g.fillRect(0, 0, w, h);
     if (a.away) { d.tex.needsUpdate = true; return; }
-    if (!atDesk && a.role !== 'manager' && a.role !== 'designer' && workTaskOf(a)) {
-      // sedang rehat: editor tetap terbuka, kursor berhenti
-      g.fillStyle = '#1d2335'; g.fillRect(0, 0, w, 16);
-      drawCode(g, a, workTaskOf(a), false);
-      g.fillStyle = 'rgba(11,14,23,.55)'; g.fillRect(0, 16, w, h - 16);
-      g.fillStyle = '#e6e8ef'; g.font = '700 13px sans-serif'; g.fillText('Rehat sebentar…', 78, 88);
-      d.tex.needsUpdate = true; return;
-    }
     if (!atDesk) {
       const px = w / 2 + Math.sin(a.ch.t * 0.7) * 70, py = h / 2 + Math.cos(a.ch.t * 0.9) * 40;
       g.fillStyle = ac; g.globalAlpha = 0.5; g.beginPath(); g.arc(px, py, 10, 0, Math.PI * 2); g.fill(); g.globalAlpha = 1;
       g.fillStyle = '#5b6276'; g.font = '600 12px sans-serif'; g.fillText(a.emp.name.toUpperCase(), 12, h - 12);
       d.tex.needsUpdate = true; return;
     }
+    g.fillStyle = '#141a26'; g.fillRect(0, 16, w, h - 16);
     g.fillStyle = '#1d2335'; g.fillRect(0, 0, w, 16);
     ['#ff6b6b', '#ffd166', '#5cc184'].forEach((c, i) => { g.fillStyle = c; g.beginPath(); g.arc(10 + i * 11, 8, 3, 0, Math.PI * 2); g.fill(); });
-    const wt = workTaskOf(a);
-    if (a.role === 'treasurer' && !wt) { drawLedger(g, a); d.tex.needsUpdate = true; return; }
-    if (a.role === 'manager') {
-      const s = api.state || { stats: {} };
-      g.fillStyle = '#8a92a8'; g.font = '600 10px sans-serif'; g.fillText('ringkasan tim', 46, 11);
-      const items = [['Open', s.stats.open], ['Dikerjakan', s.stats.inProgress], ['Selesai hari ini', s.stats.doneToday]];
-      items.forEach(([k, v], i) => { g.fillStyle = '#cfd4e2'; g.font = '500 12px sans-serif'; g.fillText(k, 16, 44 + i * 30); g.fillStyle = ac; g.font = '700 18px sans-serif'; g.fillText(String(v ?? 0), 200, 46 + i * 30); });
-    } else if (wt) {
-      g.fillStyle = '#8a92a8'; g.font = '600 10px sans-serif'; g.fillText(short(wt.title, 34), 46, 11);
-      if (a.role === 'designer') {
-        g.fillStyle = '#1d2335'; g.fillRect(20, 26, 216, 120);
-        const p = (a.ch.t * 0.08) % 1;
-        g.fillStyle = ac; g.globalAlpha = 0.85; g.fillRect(30, 36, 196 * Math.min(1, p * 1.4), 40); g.globalAlpha = 1;
-        g.fillStyle = '#ffd166'; g.beginPath(); g.arc(70, 110, 16, 0, Math.PI * 2); g.fill();
-        g.fillStyle = '#e6e8ef'; g.fillRect(100, 98, 110 * Math.min(1, p * 2), 8); g.fillRect(100, 114, 80 * Math.min(1, p * 2.3), 6);
-      } else drawCode(g, a, wt, true);
-    } else {
-      g.fillStyle = ac; g.globalAlpha = 0.16; g.fillRect(18, 30, w - 36, h - 46); g.globalAlpha = 1;
-      g.fillStyle = '#e6e8ef'; g.font = '700 15px sans-serif'; g.fillText(waitingTaskOf(a) ? 'Menunggu persetujuan' : 'Siap menerima tugas', 32, 78);
-      g.fillStyle = '#8a92a8'; g.font = '500 11px sans-serif'; g.fillText(a.emp.title, 32, 98);
-    }
+    drawScreen(g, a, finNow());
+    // kursor berkedip saat sedang mengetik
+    if (a.ch.act === 'type' && (a.ch.burst > 0 || Math.floor(simT * 2.2) % 2 === 0)) { g.fillStyle = ac; g.fillRect(12, h - 12, 60 + ((simT * 40) % 120), 3); }
     d.tex.needsUpdate = true;
-  }
-
-  /* ---------- layar kode engineer ---------- */
-  const CODE = [
-    { file: 'api/handler.js', lang: 'js', test: ['$ npm test', '✓ 18 tes lulus (1.2 dtk)'], lines: [
-      "import { db } from '../lib/db.js';", "import { kirimNotif } from '../lib/notif.js';", '',
-      'export default async function handler(req, res) {', '  const { id } = req.query;',
-      "  if (!id) return res.status(400).json({ error: 'id wajib' });", '', '  const data = await db.get(`order:${id}`);',
-      '  const aktif = data.items.filter((x) => x.aktif);', '  let total = 0;', '  for (const item of aktif) {',
-      '    total += item.qty * item.harga;', '  }', '  data.total = Math.round(total * 1.11);', "  data.status = 'diproses';",
-      '  await db.set(`order:${id}`, data);', '  await kirimNotif(data.email, total);', '  return res.json({ ok: true, total });', '}'] },
-    { file: 'laporan.py', lang: 'py', test: ['$ pytest -q', '✓ 9 passed in 0.84s'], lines: [
-      'import pandas as pd', 'from datetime import date', '', '# rekap penjualan per minggu', 'def rekap(path):',
-      '    df = pd.read_csv(path, parse_dates=["tanggal"])', '    df = df[df["status"] == "lunas"]',
-      '    df["minggu"] = df["tanggal"].dt.isocalendar().week', '    hasil = df.groupby("minggu")["total"].sum()',
-      '    return hasil.reset_index()', '', 'def simpan(hasil):', '    nama = f"rekap-{date.today()}.xlsx"',
-      '    hasil.to_excel(nama, index=False)', '    print("tersimpan:", nama)', '', 'if __name__ == "__main__":',
-      '    simpan(rekap("data/penjualan.csv"))'] },
-    { file: 'src/Dashboard.jsx', lang: 'js', test: ['$ npm run build', '✓ build selesai dalam 3.4 dtk'], lines: [
-      "import { useEffect, useState } from 'react';", "import { ambilData } from './api';", '',
-      'export function Dashboard({ userId }) {', '  const [rows, setRows] = useState([]);', '  const [loading, setLoading] = useState(true);', '',
-      '  useEffect(() => {', '    ambilData(userId)', '      .then(setRows)', '      .finally(() => setLoading(false));', '  }, [userId]);', '',
-      '  if (loading) return <Spinner />;', '  return (', '    <Tabel data={rows} kolom={["Nama", "Status", "Total"]} />', '  );', '}'] },
-    { file: 'migrasi.sql', lang: 'sql', test: ['$ npm run migrate', '✓ 3 migrasi diterapkan'], lines: [
-      '-- tabel pelanggan baru', 'CREATE TABLE pelanggan (', '  id SERIAL PRIMARY KEY,', '  nama TEXT NOT NULL,',
-      '  email TEXT UNIQUE,', '  dibuat TIMESTAMP DEFAULT now()', ');', '', 'CREATE INDEX idx_email ON pelanggan (email);', '',
-      'SELECT p.nama, COUNT(o.id) AS jumlah', 'FROM pelanggan p', 'JOIN orders o ON o.pelanggan_id = p.id',
-      "WHERE o.status = 'lunas'", 'GROUP BY p.nama', 'ORDER BY jumlah DESC', 'LIMIT 10;'] },
-  ];
-  const KW = new Set(['import', 'from', 'export', 'default', 'async', 'function', 'const', 'let', 'return', 'if', 'for', 'of', 'await', 'def', 'in', 'print', 'SELECT', 'FROM', 'WHERE', 'JOIN', 'ON', 'GROUP', 'BY', 'ORDER', 'LIMIT', 'CREATE', 'TABLE', 'INDEX', 'AS', 'DESC', 'NOT', 'NULL', 'PRIMARY', 'KEY', 'UNIQUE', 'DEFAULT', 'TEXT', 'SERIAL', 'TIMESTAMP', 'COUNT']);
-  const TOK = /(\/\/.*|--.*|#.*)|('[^']*'?|"[^"]*"?|`[^`]*`?)|(\b\d+(?:\.\d+)?\b)|([A-Za-z_]\w*)|(\s+)|(.)/g;
-  const hashStr = (t) => { let h = 7; for (const c of String(t)) h = (h * 31 + c.charCodeAt(0)) >>> 0; return h; };
-  function codeState(a, wt) {
-    let c = a.code;
-    if (!c || c.taskId !== wt.id) {
-      const k = (hashStr(wt.id) + (a.role === 'engineer' ? hashStr(a.id) : 0)) % CODE.length;
-      c = a.code = { taskId: wt.id, k, li: 0, chars: 0, done: [], last: simT, term: 0 };
-    }
-    return c;
-  }
-  function stepCode(c, typing, dt) {
-    const src = CODE[c.k];
-    if (c.term > 0) { c.term -= dt; if (c.term <= 0) { c.k = (c.k + 1) % CODE.length; c.li = 0; c.chars = 0; c.done = []; } return; }
-    if (!typing) return;
-    c.chars += dt * (11 + Math.random() * 8);
-    while (c.li < src.lines.length && c.chars >= src.lines[c.li].length) {
-      c.chars -= Math.max(src.lines[c.li].length, 0); c.done.push(src.lines[c.li]); c.li++;
-      if (!src.lines[c.li - 1]) c.chars = 0;
-    }
-    if (c.li >= src.lines.length) c.term = 5;
-  }
-  function drawLine(g, text, x, y, maxX, lang) {
-    TOK.lastIndex = 0; let m;
-    while ((m = TOK.exec(text)) && x < maxX) {
-      const t = m[0];
-      if (m[1] && (lang !== 'py' || t.startsWith('#')) && (lang === 'sql' ? t.startsWith('--') : !t.startsWith('--'))) g.fillStyle = '#7d8799';
-      else if (m[2]) g.fillStyle = '#a5d6ff';
-      else if (m[3]) g.fillStyle = '#79c0ff';
-      else if (m[4]) g.fillStyle = KW.has(t) ? '#ff7b72' : text[TOK.lastIndex] === '(' ? '#d2a8ff' : '#e6edf3';
-      else g.fillStyle = '#c9d1d9';
-      if (!m[5]) g.fillText(t, x, y);
-      x += g.measureText(t).width;
-    }
-    return x;
-  }
-  function drawCode(g, a, wt, live) {
-    const w = 256, h = 160, c = codeState(a, wt), src = CODE[c.k];
-    const dt = Math.min(1, simT - c.last); c.last = simT;
-    if (live) stepCode(c, a.ch.act === 'type' && a.ch.burst > 0, dt);
-    g.fillStyle = '#141a26'; g.fillRect(0, 16, w, h - 16);
-    g.fillStyle = '#161b26'; g.fillRect(44, 0, 96, 16);
-    g.fillStyle = '#c9d1d9'; g.font = '600 9px sans-serif'; g.fillText(src.file, 50, 11);
-    g.fillStyle = '#5b6276'; g.fillText(short(wt.title, 18), 148, 11);
-    g.font = '600 12px ui-monospace, Menlo, Consolas, monospace';
-    const LH = 14, termH = c.term > 0 ? 38 : 0, rows = Math.floor((h - 20 - termH) / LH);
-    const cur = c.li < src.lines.length && c.term <= 0 ? src.lines[c.li].slice(0, Math.floor(c.chars)) : null;
-    const all = cur === null ? c.done : [...c.done, cur];
-    const start = Math.max(0, all.length - rows);
-    let endX = 26;
-    for (let i = start; i < all.length; i++) {
-      const y = 30 + (i - start) * LH;
-      g.fillStyle = '#4a5268'; g.fillText(String(i + 1).padStart(2, ' '), 3, y);
-      endX = drawLine(g, all[i], 26, y, w - 4, src.lang);
-    }
-    if (cur !== null && (a.ch.burst > 0 || Math.floor(simT * 2.2) % 2 === 0)) { g.fillStyle = '#e6edf3'; g.fillRect(endX + 1, 30 + (all.length - 1 - start) * LH - 10, 7, 12); }
-    if (termH) {
-      g.fillStyle = '#0a0d14'; g.fillRect(0, h - termH, w, termH); g.fillStyle = '#262d3d'; g.fillRect(0, h - termH, w, 1);
-      g.fillStyle = '#9aa3b8'; g.fillText(src.test[0], 8, h - termH + 15);
-      if (c.term < 3.8) { g.fillStyle = '#5cc184'; g.fillText(src.test[1], 8, h - termH + 31); }
-    }
   }
 
   /* ---------- label nama ---------- */
@@ -720,7 +584,7 @@ export function initOffice({ stage, onSelectEmployee }) {
       tmp.copy(a.ch.pos); tmp.y = a.ch.sitting ? 1.62 : 1.82; tmp.project(camera);
       L.el.style.transform = `translate(${((tmp.x * 0.5 + 0.5) * W).toFixed(1)}px, ${((-tmp.y * 0.5 + 0.5) * H).toFixed(1)}px) translate(-50%, -100%)`;
       L.el.style.zIndex = String(1000 + Math.round(-tmp.z * 500));
-      const working = !!workTaskOf(a) && a.script && a.script.kind === 'work';
+      const working = !!a.script && (a.script.kind === 'work' || a.script.kind === 'task');
       L.el.classList.toggle('far', far && selected !== a && !working);
       if (L.last !== a.status) { L.st.textContent = a.status; L.last = a.status; }
       L.pg.hidden = !working;
@@ -802,7 +666,7 @@ export function initOffice({ stage, onSelectEmployee }) {
   setEco(ecoOn, false);
   skyNow();
   wake();
-  if (api.state) stateHandler(api.state, null);
+  if (api.state) stateHandler(api.state);
 
   // dipakai untuk uji otomatis: majukan simulasi tanpa menunggu frame
   window.__kantor = {

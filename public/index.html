@@ -3,13 +3,13 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>Studio Konten AI</title>
+<title>Kantor Arus</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,800&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@500&display=swap">
 <script type="importmap">{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js" } }</script>
 <style>
-/* Layout: kantor 3D dominan di kiri, dashboard Kanban di kanan (bisa disembunyikan); di HP jadi dua tab */
+/* Layout: kantor 3D dominan di kiri, panel keuangan di kanan (bisa disembunyikan); di HP jadi dua tab */
 *,*::before,*::after{box-sizing:border-box}
 body{margin:0}
 [hidden]{display:none!important}
@@ -101,64 +101,52 @@ button.link{border:0;background:none;padding:0;color:var(--accent);text-decorati
 .av{display:inline-grid;place-items:center;width:20px;height:20px;border-radius:50%;background:var(--c);color:#fff;font-size:9.5px;font-weight:600;flex:none}
 .av.big{width:38px;height:38px;font-size:14px}
 
-/* dashboard */
+/* panel keuangan */
 .board{background:var(--panel);border:1px solid var(--line);border-radius:14px;display:flex;flex-direction:column;min-height:0;min-width:0;overflow:hidden}
 .b-head{padding:12px 14px 10px;border-bottom:1px solid var(--line);display:flex;flex-direction:column;gap:10px}
-.b-title{display:flex;align-items:center;gap:8px}
+.b-title{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .b-title h2{margin:0;font-family:var(--display);font-size:17px;margin-right:auto}
 #conn{font-size:11px;text-transform:uppercase;letter-spacing:.08em;font-weight:600;color:var(--muted)}
-#conn[data-s="terhubung"],#conn[data-s="lokal"]{color:var(--ok)}
-#conn[data-s="tanpa penyimpanan"],#conn[data-s="terputus"],#conn[data-s="butuh kunci"]{color:var(--warn)}
-.stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px}
-.stats div{background:var(--panel-2);border-radius:9px;padding:7px 9px;display:flex;flex-direction:column;gap:1px;min-width:0}
-.stats b{font-family:var(--display);font-size:20px;font-variant-numeric:tabular-nums;line-height:1.1}
-.stats span{font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.toolbar{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
-.toolbar select{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:6px 8px;font-size:13px;min-width:0;max-width:170px}
-.toolbar .grow{margin-left:auto;display:flex;gap:6px}
-.readonly{margin:0;font-size:12.5px;background:color-mix(in srgb, var(--warn) 14%, var(--panel));border:1px solid color-mix(in srgb, var(--warn) 40%, var(--line));border-radius:8px;padding:7px 10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
-.b-body{flex:1;min-height:0;overflow:auto;display:flex;flex-direction:column}
-.kanban{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;padding:10px 12px;min-width:0}
-.col{background:var(--panel-2);border-radius:11px;padding:8px;display:flex;flex-direction:column;gap:8px;min-width:0;border:1.5px dashed transparent;transition:border-color .15s, background .15s}
-.col.over{border-color:var(--accent);background:var(--accent-soft)}
-.col h3{margin:0;font-size:12px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);display:flex;justify-content:space-between;padding:2px 4px}
-.col h3 .count{font-family:var(--mono);color:var(--fg)}
-.list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:7px;min-height:40px}
-.card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:9px 10px;display:flex;flex-direction:column;gap:6px;cursor:pointer;box-shadow:0 1px 2px rgba(10,14,30,.05);transition:border-color .15s}
-.card:hover{border-color:color-mix(in srgb, var(--accent) 50%, var(--line))}
-.card.sel{border-color:var(--accent);box-shadow:0 0 0 2px var(--accent-soft)}
-.card.dragging{opacity:.45}
-.card.hi{border-left:3px solid var(--bad)}
-.card h4{margin:0;font-size:13.5px;font-weight:600;line-height:1.35;overflow-wrap:anywhere}
-.c-top{display:flex;gap:6px;align-items:center;font-size:11px;color:var(--muted);min-width:0}
-.dot{width:8px;height:8px;border-radius:50%;background:var(--pc);flex:none}
-.proj{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
-.prio{margin-left:auto;font-weight:600;font-size:10.5px;flex:none}
-.prio.high{color:var(--bad)} .prio.medium{color:var(--muted)} .prio.low{color:var(--ok)}
-.c-meta{display:flex;flex-wrap:wrap;gap:6px 10px;align-items:center;font-size:12px}
-.who{display:inline-flex;gap:5px;align-items:center}
-.muted{color:var(--muted)}
-.due{font-size:11px;font-family:var(--mono)}
-.due.late{color:var(--bad);font-weight:600} .due.soon{color:var(--warn)}
-.lbl{font-size:10.5px;border:1px solid var(--line);border-radius:99px;padding:0 6px;color:var(--muted)}
-.badge{font-size:11px;font-weight:600;border-radius:7px;padding:3px 7px;display:inline-flex;gap:6px;align-items:center;align-self:flex-start}
-.badge.review{background:color-mix(in srgb, var(--accent) 15%, var(--panel));color:var(--accent)}
-.badge.review i{width:7px;height:7px;border-radius:50%;background:currentColor;animation:pulse 1s ease-in-out infinite}
-.badge.waiting{background:color-mix(in srgb, var(--warn) 16%, var(--panel));color:var(--warn)}
-.badge.mini{font-size:10px;padding:1px 6px}
-@keyframes pulse{50%{opacity:.3}}
-.c-act{display:flex;gap:5px;flex-wrap:wrap}
-.c-act button{font-size:11.5px;padding:3px 7px}
-.c-act .edit{margin-left:auto}
-.empty{color:var(--muted);font-size:12.5px;line-height:1.45;padding:6px 4px}
-.more{width:100%;font-size:12px}
-.feed-wrap{border-top:1px solid var(--line);padding:10px 14px 14px;display:flex;flex-direction:column;gap:8px}
-.feed-wrap h3{margin:0;font-size:12px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted)}
+#conn[data-s="terhubung"],#conn[data-s="demo"]{color:var(--ok)}
+#conn[data-s="terputus"],#conn[data-s="butuh kunci"],#conn[data-s="gagal"],#conn[data-s="belum diatur"]{color:var(--warn)}
+a.btn{font-size:13px;font-weight:500;border:1px solid var(--accent);background:var(--accent);color:var(--panel);border-radius:8px;padding:6px 11px;text-decoration:none}
+.b-body{flex:1;min-height:0;overflow:auto;display:flex;flex-direction:column;gap:14px;padding:12px 14px 16px}
+.status{border-radius:12px;padding:10px 12px;display:flex;flex-direction:column;gap:4px;border:1px solid var(--line);background:var(--panel-2)}
+.status b{font-family:var(--display);font-size:16px;display:flex;align-items:center;gap:8px}
+.status b i{width:10px;height:10px;border-radius:50%;background:var(--c)}
+.status ul{margin:0;padding-left:18px;font-size:12.5px;color:var(--muted);display:flex;flex-direction:column;gap:2px}
+.status[data-l="aman"]{--c:var(--ok)} .status[data-l="waspada"]{--c:var(--warn);background:color-mix(in srgb, var(--warn) 10%, var(--panel))} .status[data-l="kritis"]{--c:var(--bad);background:color-mix(in srgb, var(--bad) 10%, var(--panel))}
+.stats{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px}
+.stats div{background:var(--panel-2);border-radius:9px;padding:8px 10px;display:flex;flex-direction:column;gap:1px;min-width:0}
+.stats b{font-family:var(--display);font-size:18px;font-variant-numeric:tabular-nums;line-height:1.15;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.stats span{font-size:11.5px;color:var(--muted)}
+.stats .neg b{color:var(--bad)}
+.sec{display:flex;flex-direction:column;gap:7px}
+.sec h3{margin:0;font-size:12px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);display:flex;gap:8px;align-items:center}
+.sec h3 .av{font-size:9px}
+.rows{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:7px;font-size:13px}
+.rows li{display:flex;flex-direction:column;gap:3px}
+.rows .ln{display:flex;gap:8px;align-items:baseline;justify-content:space-between}
+.rows .ln span:first-child{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.num{font-variant-numeric:tabular-nums;white-space:nowrap;font-size:12.5px}
+.bar{height:6px;border-radius:3px;background:var(--panel-2);overflow:hidden}
+.bar i{display:block;height:100%;background:var(--ok);border-radius:3px}
+.bar i.w{background:var(--warn)} .bar i.x{background:var(--bad)}
+.chip{font-size:11px;font-weight:600;border-radius:6px;padding:1px 6px;white-space:nowrap}
+.chip.lunas{background:color-mix(in srgb, var(--ok) 15%, var(--panel));color:var(--ok)}
+.chip.terlambat{background:color-mix(in srgb, var(--bad) 15%, var(--panel));color:var(--bad)}
+.chip.hari_ini,.chip.besok{background:color-mix(in srgb, var(--warn) 18%, var(--panel));color:var(--warn)}
+.chip.nanti,.chip.dilewati{background:var(--panel-2);color:var(--muted)}
+.empty{color:var(--muted);font-size:12.5px;line-height:1.45}
 #feed{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:7px;font-size:12.5px}
-#feed li{display:grid;grid-template-columns:10px minmax(0,1fr) auto;gap:8px;align-items:baseline}
-.f-dot{width:8px;height:8px;border-radius:50%;background:var(--c);transform:translateY(-1px)}
+#feed li{display:grid;grid-template-columns:20px minmax(0,1fr) auto;gap:8px;align-items:center}
 #feed time{font-size:11px;color:var(--muted);font-family:var(--mono);white-space:nowrap}
-.f-done .f-text{font-weight:600}
+.pos{color:var(--ok)} .negv{color:var(--bad)}
+.setup{background:var(--panel-2);border-radius:12px;padding:12px 14px;font-size:13px;line-height:1.5}
+.setup code{font-family:var(--mono);font-size:12px;background:var(--panel);padding:1px 5px;border-radius:5px}
+.pf-list{margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:5px;font-size:12.5px}
+.pf-list li{display:flex;gap:8px;justify-content:space-between}
+.blur .num,.blur .stats b,.blur .mtag .amt{filter:blur(6px)}
 
 /* dialog */
 dialog{border:1px solid var(--line);border-radius:14px;padding:0;background:var(--panel);color:var(--fg);width:min(520px, calc(100vw - 24px));max-height:calc(100vh - 40px)}
@@ -174,25 +162,10 @@ dialog h2{margin:0;font-family:var(--display);font-size:18px}
 fieldset{border:0;margin:0;padding:0}
 .radios{display:flex;gap:14px}
 .radios label{display:flex;gap:6px;align-items:center;font-weight:400;font-size:13px}
-#p-colors{display:flex;gap:6px;flex-wrap:wrap}
-#p-colors .sw{position:relative}
-#p-colors .sw input{position:absolute;opacity:0;width:0;height:0}
-#p-colors .sw span{display:block;width:26px;height:26px;border-radius:50%;background:var(--c);border:3px solid var(--panel);box-shadow:0 0 0 1px var(--line);cursor:pointer}
-#p-colors .sw input:checked + span{box-shadow:0 0 0 2px var(--fg)}
-#p-colors .sw input:focus-visible + span{outline:2px solid var(--accent);outline-offset:2px}
-#p-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px;max-height:200px;overflow:auto}
-#p-list li{display:flex;gap:8px;align-items:center;font-size:13px;flex-wrap:wrap}
-#p-list .pn{font-weight:600}
-#p-list .pc{color:var(--muted);font-size:12px;margin-right:auto}
-#p-list .confirm{font-size:12px;display:flex;gap:6px;align-items:center}
 .actions{display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap;align-items:center}
 .actions .left{margin-right:auto;display:flex;gap:6px;align-items:center;font-size:12.5px}
 .note{font-size:12px;color:var(--muted);margin:0}
 .note.err,.err{color:var(--bad);font-size:12.5px;margin:0}
-#t-history{border-top:1px solid var(--line);padding-top:10px}
-#t-history h3{margin:0 0 6px;font-size:12px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted)}
-#t-history ol{margin:0;padding-left:18px;display:flex;flex-direction:column;gap:3px;font-size:12.5px;max-height:150px;overflow:auto}
-#t-history time{color:var(--muted);font-family:var(--mono);font-size:11px;margin-left:6px}
 .toast{position:fixed;left:50%;bottom:22px;transform:translate(-50%,20px);background:var(--fg);color:var(--panel);padding:9px 14px;border-radius:9px;font-size:13px;opacity:0;pointer-events:none;transition:all .25s;z-index:20;max-width:calc(100vw - 32px)}
 .toast.show{opacity:1;transform:translate(-50%,0)}
 .toast.err{background:var(--bad)}
@@ -204,26 +177,24 @@ fieldset{border:0;margin:0;padding:0}
   .tabs button{flex:1}
   .main,.main.wide,.main.hide-board{grid-template-columns:minmax(0,1fr)}
   .main[data-tab="kantor"] .board{display:none}
-  .main[data-tab="task"] .stage{display:none}
-  .main.hide-board[data-tab="task"] .board{display:flex}
+  .main[data-tab="uang"] .stage{display:none}
+  .main.hide-board[data-tab="uang"] .board{display:flex}
   .stage{height:70vh;min-height:380px}
   .board{overflow:visible}
   .b-body{overflow:visible}
-  .kanban{grid-template-columns:minmax(0,1fr)}
-  .stats{grid-template-columns:repeat(2,minmax(0,1fr))}
-  #toggle-board,#wide-board{display:none}
+    #toggle-board,#wide-board{display:none}
 }
-@media (prefers-reduced-motion: reduce){.tag .pg i,.badge.review i{animation:none}}
+@media (prefers-reduced-motion: reduce){.tag .pg i{animation:none}}
 </style>
 </head>
 <body>
 <div class="app">
   <header class="top">
     <div class="brand">
-      <h1>Studio Konten AI</h1>
-      <p>Lantai 38 · Raihan, Kartika, Irham, Fariz, Cimol, dan Aci</p>
+      <h1>Kantor Arus</h1>
+      <p id="team-line">Lantai 38 · tim keuangan pribadi Anda</p>
     </div>
-    <div class="clock"><b id="clock">--:--</b><span id="day">Hari ke-1</span></div>
+    <div class="clock"><b id="clock">--:--</b><span id="day"></span></div>
     <div class="controls">
       <button id="pause" aria-pressed="false">Jeda</button>
       <div class="seg mono" role="group" aria-label="Kecepatan animasi">
@@ -232,14 +203,15 @@ fieldset{border:0;margin:0;padding:0}
         <button data-s="4" aria-pressed="false">4×</button>
       </div>
       <button id="eco" aria-pressed="false" title="Kurangi beban grafis supaya laptop lebih dingin dan baterai awet"><span class="lf"></span>Mode hemat</button>
-      <button id="wide-board" aria-pressed="false">Perlebar dashboard</button>
-      <button id="toggle-board" aria-pressed="false">Sembunyikan dashboard</button>
+      <button id="hide-num" aria-pressed="false" title="Samarkan semua nominal">Sembunyikan nominal</button>
+      <button id="wide-board" aria-pressed="false">Perlebar panel</button>
+      <button id="toggle-board" aria-pressed="false">Sembunyikan panel</button>
     </div>
   </header>
 
   <div class="tabs seg" role="tablist" aria-label="Tampilan">
     <button role="tab" data-tab="kantor" aria-pressed="true">Kantor</button>
-    <button role="tab" data-tab="task" aria-pressed="false">Task</button>
+    <button role="tab" data-tab="uang" aria-pressed="false">Keuangan</button>
   </div>
 
   <main class="main" id="main" data-tab="kantor">
@@ -258,93 +230,22 @@ fieldset{border:0;margin:0;padding:0}
         <button id="zo" title="Perkecil" aria-label="Perkecil">−</button>
       </div>
       <div id="profile" hidden></div>
-      <div class="placeholder" id="office-placeholder"><div>Kantor 3D baru sedang disiapkan.<br>Sementara itu, kelola task dari dashboard.</div></div>
+      <div class="placeholder" id="office-placeholder"><div>Kantor 3D sedang disiapkan…</div></div>
     </section>
 
-    <aside class="board" id="board" aria-label="Dashboard task">
+    <aside class="board" id="board" aria-label="Ringkasan keuangan">
       <div class="b-head">
-        <div class="b-title"><h2>Task</h2><span id="conn">menghubungkan</span><button id="btn-keys">Kunci</button></div>
-        <div class="stats">
-          <div><b id="st-open">0</b><span>Open</span></div>
-          <div><b id="st-progress">0</b><span>Dikerjakan</span></div>
-          <div><b id="st-today">0</b><span>Selesai hari ini</span></div>
-          <div><b id="st-total">0</b><span>Total selesai</span></div>
-        </div>
-        <p class="readonly" id="readonly" hidden>Mode lihat saja. Isi kunci tulis untuk menambah dan memindahkan task. <button class="link" id="readonly-keys">Isi kunci</button></p>
-        <div class="toolbar">
-          <div class="seg" id="f-cat" role="group" aria-label="Kategori">
-            <button data-v="semua">Semua</button><button data-v="kantor">Kantor</button><button data-v="pribadi">Pribadi</button>
-          </div>
-          <select id="f-project" aria-label="Filter project"></select>
-          <select id="f-person" aria-label="Filter karyawan"></select>
-          <div class="grow">
-            <button id="btn-project">+ Project</button>
-            <button id="btn-task" class="primary">+ Task baru</button>
-          </div>
-        </div>
+        <div class="b-title"><h2 id="b-month">Keuangan</h2><span id="conn">menghubungkan</span><button id="btn-keys">Kunci</button><a class="btn" id="open-arus" href="#" target="_blank" rel="noopener" hidden>Buka Arus</a></div>
       </div>
-      <div class="b-body">
-        <div class="kanban">
-          <section class="col" id="col-open"><h3>Open <span class="count">0</span></h3><ul class="list"></ul></section>
-          <section class="col" id="col-progress"><h3>On Progress <span class="count">0</span></h3><ul class="list"></ul></section>
-          <section class="col" id="col-done"><h3>Done <span class="count">0</span></h3><ul class="list"></ul></section>
-        </div>
-        <section class="feed-wrap"><h3>Aktivitas</h3><ul id="feed"></ul></section>
-      </div>
+      <div class="b-body" id="panel"></div>
     </aside>
   </main>
 </div>
 
-<dialog id="dlg-task" aria-labelledby="t-heading">
-  <form id="task-form" method="dialog" novalidate>
-    <h2 id="t-heading">Task baru</h2>
-    <p class="note" id="t-ro" hidden>Mode lihat saja. Isi kunci tulis untuk mengubah task.</p>
-    <div class="fld"><label for="t-title">Judul</label><input type="text" id="t-title" maxlength="160" required placeholder="Contoh: Buat landing page promo"></div>
-    <div class="row2">
-      <div class="fld"><label for="t-project">Project</label><select id="t-project"></select></div>
-      <div class="fld"><label for="t-prio">Prioritas</label><select id="t-prio"><option value="low">Rendah</option><option value="medium">Sedang</option><option value="high">Tinggi</option></select></div>
-    </div>
-    <div class="row2">
-      <div class="fld"><label for="t-assignee">Dikerjakan oleh</label><select id="t-assignee"></select></div>
-      <div class="fld"><label for="t-deadline">Deadline</label><input type="date" id="t-deadline"></div>
-    </div>
-    <div class="fld"><label for="t-desc">Deskripsi</label><textarea id="t-desc" maxlength="4000" placeholder="Opsional"></textarea></div>
-    <label class="chk"><input type="checkbox" id="t-design"> Task desain (otomatis untuk Designer)</label>
-    <section id="t-history" hidden><h3>Riwayat</h3><ol></ol></section>
-    <p class="err" id="t-err" role="alert"></p>
-    <div class="actions">
-      <div class="left">
-        <button type="button" id="t-delete" class="danger">Hapus</button>
-        <span id="t-confirm" hidden>Hapus task ini? <button type="button" id="t-confirm-yes" class="danger">Ya, hapus</button> <button type="button" id="t-confirm-no">Batal</button></span>
-      </div>
-      <button type="submit" value="cancel" formnovalidate>Tutup</button>
-      <button type="submit" value="save" class="primary" id="t-save">Buat task</button>
-    </div>
-  </form>
-</dialog>
-
-<dialog id="dlg-project" aria-labelledby="p-heading">
-  <form id="project-form" method="dialog" novalidate>
-    <h2 id="p-heading">Project</h2>
-    <div class="fld"><label for="p-name">Nama project baru</label><input type="text" id="p-name" maxlength="60" placeholder="Contoh: Website Toko"></div>
-    <fieldset class="fld"><legend>Kategori</legend>
-      <div class="radios"><label><input type="radio" name="p-cat" value="kantor" checked> Kantor</label><label><input type="radio" name="p-cat" value="pribadi"> Pribadi</label></div>
-    </fieldset>
-    <fieldset class="fld"><legend>Warna</legend><div id="p-colors"></div></fieldset>
-    <p class="err" id="p-err" role="alert"></p>
-    <div class="actions">
-      <button type="submit" value="cancel" formnovalidate>Tutup</button>
-      <button type="submit" value="save" class="primary">Buat project</button>
-    </div>
-    <div class="fld"><label>Project yang ada</label><ul id="p-list"></ul></div>
-  </form>
-</dialog>
-
 <dialog id="dlg-keys" aria-labelledby="k-heading">
   <form id="key-form" method="dialog" novalidate>
     <h2 id="k-heading">Kunci akses</h2>
-    <div class="fld"><label for="k-read">Kunci baca (OFFICE_READ_KEY)</label><input type="password" id="k-read" autocomplete="off"></div>
-    <div class="fld"><label for="k-write">Kunci tulis (OFFICE_WRITE_KEY)</label><input type="password" id="k-write" autocomplete="off"><span class="note">Dibutuhkan untuk membuat dan memindahkan task.</span></div>
+    <div class="fld"><label for="k-read">Kunci baca (OFFICE_READ_KEY)</label><input type="password" id="k-read" autocomplete="off"><span class="note">Disimpan di browser ini saja.</span></div>
     <p class="note" id="k-msg" role="status"></p>
     <div class="actions">
       <button type="submit" value="cancel" formnovalidate>Tutup</button>

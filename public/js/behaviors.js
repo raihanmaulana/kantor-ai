@@ -96,7 +96,7 @@ export function idleOptions(a, O) {
   } else {
     opts.push({ name: 'desk', w: 3, cd: 0, make: () => sitDesk(pick(['Merapikan catatan', 'Membaca dokumentasi', 'Cek pesan tim', 'Mencari referensi']), rand(15, 40)) });
   }
-  if (a.role === 'coordinator') {
+  if (a.role === 'planner') {
     opts.push({ name: 'tidyBoard', w: 1, cd: 200, make: () => {
       const spot = P.boardWrite.find((s, i) => a.reserve('board' + i)); if (!spot) return null;
       return { kind: 'idle', name: 'tidyBoard', status: 'Merapikan papan task', steps: [S.walk(spot), S.face(spot.rot), S.act('write', { dur: rand(3, 5), props: { marker: true } })] };

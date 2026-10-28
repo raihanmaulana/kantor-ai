@@ -49,8 +49,8 @@ const server = http.createServer(async (req, res) => {
 
 const port = Number(process.env.PORT || 3000);
 server.listen(port, async () => {
-  const { backend } = await import('./lib/store.js');
+  const { financeMode } = await import('./lib/finance.js');
+  const mode = financeMode();
   console.log(`Kantor AI berjalan di http://localhost:${port}`);
-  console.log('Penyimpanan: ' + (backend === 'redis' ? 'Upstash Redis' : backend === 'file' ? 'file data/kantor-ai.json (tetap ada walau server dimatikan)' : 'memori'));
-  if (!process.env.OFFICE_WRITE_KEY) console.log('Peringatan: OFFICE_WRITE_KEY belum diatur, dashboard tidak bisa menyimpan perubahan. Salin .env.example ke .env.');
+  console.log('Data keuangan: ' + (mode === 'supabase' ? 'Supabase Arus' : mode === 'demo' ? 'data contoh (FINANCE_DEMO=1)' : 'belum diatur, isi variabel di .env (lihat .env.example)'));
 });

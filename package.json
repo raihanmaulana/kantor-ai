@@ -2,17 +2,12 @@
   "name": "kantor-ai",
   "version": "1.0.0",
   "private": true,
-  "description": "Dashboard task dan kantor 3D yang hidup: karyawan bergerak sesuai status task.",
+  "description": "Kantor 3D yang hidup mendampingi Arus: karyawan virtual bergerak sesuai keuangan Anda.",
   "type": "module",
   "engines": {
     "node": ">=18"
   },
   "scripts": {
-    "local": "node local-server.mjs",
-    "install-hooks": "node install-hooks.mjs",
-    "test-event": "node scripts/send-test.mjs"
-  },
-  "dependencies": {
-    "@upstash/redis": "^1.34.0"
+    "local": "node local-server.mjs"
   }
 }
