@@ -409,6 +409,7 @@ export function initOffice({ stage, onSelectEmployee }) {
     adjust: (e) => short(e.label, 28),
     'pocket-new': (e) => short(e.label, 30),
     'pocket-edit': (e) => short(e.label, 30),
+    cashback: (e) => short(e.label, 24) + ' ' + signed(e.amount),
     income: (e) => 'Pemasukan masuk ' + signed(e.amount),
     'income-edit': () => 'Memeriksa pemasukan bulan ini',
   };
