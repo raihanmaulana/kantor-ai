@@ -516,7 +516,7 @@ export function initOffice({ stage, onSelectEmployee }) {
     if (!first && busyRoles.has('planner') === false) drawObj('board');
   }
   /* ---------- reaksi terhadap kondisi keuangan (bukan hanya kegiatan) ---------- */
-  const cond = { warned: new Set(), billCalls: new Set(), lastMeeting: -1e9, lastLate: -1e9, lastPanic: -1e9, evalT: 12 };
+  const cond = { warned: new Set(), billCalls: new Set(), lastMeeting: -1e9, meetingReason: '', lastLate: -1e9, lastPanic: -1e9, evalT: 12 };
   const pending = (a, name) => a.queue.some((x) => x.name === name) || (a.script && a.script.name === name);
   const present = (a) => a && !a.away && !(a.script && (a.script.name === 'arrive' || a.script.name === 'home'));
   // Satu reaksi per pemeriksaan (tiap 15 detik), dipilih menurut prioritas, supaya kantor tidak riuh sekaligus.
@@ -532,19 +532,21 @@ export function initOffice({ stage, onSelectEmployee }) {
     const reactions = [
       // Kritis: Raihan memanggil rapat darurat (paling sering tiap 8 menit)
       () => {
-        if (lv !== 'kritis' || simT - cond.lastMeeting < 480 || !free(mgr)) return false;
+        // rapat saat kondisi baru menjadi kritis / alasannya berubah; kalau tetap sama, paling sering tiap 45 menit
+        const reason = f.status.reasons.join('|');
+        if (lv !== 'kritis' || !free(mgr) || (reason === cond.meetingReason && simT - cond.lastMeeting < 2700) || simT - cond.lastMeeting < 300) return false;
         const who = late.length ? billing : planner; if (!free(who)) return false;
-        cond.lastMeeting = simT; meetingScripts(mgr, who, f.status.reasons[0] || 'Kondisi keuangan kritis'); return true;
+        cond.lastMeeting = simT; cond.meetingReason = reason; meetingScripts(mgr, who, f.status.reasons[0] || 'Kondisi keuangan kritis'); return true;
       },
       // tagihan terlambat: Irham melapor ke ruang Manager (tiap 5 menit)
       () => {
-        if (!late.length || simT - cond.lastLate < 300 || !free(billing) || !free(mgr) || !atDesk(mgr)) return false;
+        if (!late.length || simT - cond.lastLate < 900 || !free(billing) || !free(mgr) || !atDesk(mgr)) return false;
         cond.lastLate = simT; billing.enqueue(reportScript(billing, mgr, 'Melapor tagihan telat: ' + late.map((x) => x.name).slice(0, 2).join(', '))); return true;
       },
       // saldo minus: Aci panik di depan alasnya (tiap 5 menit)
       () => {
         const ps = vaultPockets(), neg = ps.findIndex((p) => p.saldo < 0);
-        if (neg < 0 || simT - cond.lastPanic < 300 || !free(aci)) return false;
+        if (neg < 0 || simT - cond.lastPanic < 600 || !free(aci)) return false;
         cond.lastPanic = simT;
         const slot = world.vaultSlots[neg], p = ps[neg];
         aci.enqueue({ kind: 'task', name: 'panic', status: 'Saldo ' + p.name + ' minus!', steps: [S.walk(slot.front), S.face(slot.front.rot), S.act('panic', { dur: 3.5, status: 'Saldo ' + p.name + ' minus!' }), S.act('listenStand', { dur: 2, status: 'Perlu diisi dari sumber dana lain' })] });
@@ -897,6 +899,8 @@ export function initOffice({ stage, onSelectEmployee }) {
   // dipakai untuk uji otomatis: majukan simulasi tanpa menunggu frame
   window.__kantor = {
     step(sec) { for (let t = 0; t < sec; t += 0.05) { simT += 0.05; for (const a of agents) { a.update(0.05); a.ch.update(0.05, { lookAt: a.lookAt }); } world.tick(0.05); } evaluateConditions(); for (const a of agents) paintMonitor(a); },
+    // uji: sela aktivitas karyawan dengan tugas jalan-lalu-duduk (meniru panggilan mendadak)
+    poke: (id) => { const a = byId.get(id); if (!a || a.away) return; const seat = world.POI.meetSeats[(Math.random() * 3) | 0]; a.enqueue({ kind: 'task', name: 'poke', status: 'Uji sela', steps: [S.sit({ seat, front: { x: seat.x, z: seat.z + 0.75 } }), S.act('sit', { dur: 1 })] }); },
     look: (x, z, zm, angle) => { manualTarget = { x, z }; zoomT = zm; if (angle != null) azT = angle; },
     focus: (id, angle) => { const a = byId.get(id); if (a) { select(a); setFollow(true); zoomT = 3; if (angle != null) azT = angle; } },
     agents: () => agents.map((a) => ({ id: a.id, status: a.status, script: a.script && a.script.name, q: a.queue.map((s) => s.name).join(','), away: a.away, x: +a.ch.pos.x.toFixed(2), z: +a.ch.pos.z.toFixed(2) })),

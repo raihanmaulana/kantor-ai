@@ -114,6 +114,7 @@ export class Character {
     this.t = Math.random() * 10; this.seed = Math.random() * 10;
     this.speed = 0; this.walkSpeed = 1.7 + Math.random() * 0.35; this.phase = 0; this.stepPhase = 0;
     this.curve = null; this.s = 0; this.onArrive = null;
+    this.cmd = 0;   // nomor perintah gerak; callback dari perintah lama diabaikan
     this.tween = null; this.sitting = false; this.seat = null;
     this.act = 'stand'; this.actT = 0;
     this.burst = 1; this.burstT = 0; this.mouseT = 0; this.cheerT = 0; this.waveT = 0; this.blinkT = 1 + Math.random() * 3; this.sipT = 1;
@@ -133,33 +134,46 @@ export class Character {
   cheer() { this.cheerT = 1.8; }
   wave() { this.waveT = 2.0; }
 
+  // Batalkan gerakan yang sedang berjalan beserta callback-nya (dipanggil saat skrip disela).
+  cancel() {
+    this.cmd++;
+    if (this.curve) { this.curve = null; this.speed = 0; this.onArrive = null; if (!this.sitting) this.act = 'stand'; }
+    if (this.tween) this.tween.cb = null;
+  }
+
   // Jalan ke titik (x, z) memakai A*. Kalau sedang duduk, berdiri dulu.
   walkTo(target, onArrive) {
+    const tok = ++this.cmd;
     const go = () => {
+      if (tok !== this.cmd) return;
       const path = this.nav.path({ x: this.pos.x, z: this.pos.z }, target) || [{ x: this.pos.x, z: this.pos.z }, target];
       if (path.length < 2 || Math.hypot(target.x - this.pos.x, target.z - this.pos.z) < 0.05) { this.curve = null; onArrive && onArrive(); return; }
       const pts = path.map((p) => new THREE.Vector3(p.x, 0, p.z));
       this.curve = new THREE.CatmullRomCurve3(pts, false, 'centripetal', 0.2);
       this.curveLen = Math.max(0.01, this.curve.getLength()); this.s = 0; this.onArrive = onArrive; this.act = 'walk';
     };
-    if (this.sitting) this.standUp(go); else go();
+    if (this.sitting) this.standUp(go, true); else go();
   }
 
   // Duduk di kursi/sofa: seatInfo = { seat:{x,z,rot}, front:{x,z}, desk? }
   sitAt(seatInfo, onDone) {
+    let tok;
     const doSit = () => {
+      if (tok !== this.cmd) return;
       this.rotTarget = seatInfo.seat.rot;
       this.sitting = true; this.seat = seatInfo; this.act = 'sitdown';
-      this.tween = { from: this.pos.clone(), to: new THREE.Vector3(seatInfo.seat.x, 0, seatInfo.seat.z), t: 0, dur: 0.8, delay: 0.25, done: () => { this.act = 'sit'; onDone && onDone(); } };
+      this.tween = { from: this.pos.clone(), to: new THREE.Vector3(seatInfo.seat.x, 0, seatInfo.seat.z), t: 0, dur: 0.8, delay: 0.25, fin: () => { this.act = 'sit'; }, cb: onDone };
     };
-    if (this.sitting && this.seat === seatInfo) { onDone && onDone(); return; }
+    if (this.sitting && this.seat === seatInfo && !this.tween) { this.cmd++; onDone && onDone(); return; }
+    tok = this.cmd + 1;               // nomor yang akan dipakai walkTo di bawah
     this.walkTo(seatInfo.front, doSit);
   }
-  standUp(onDone) {
+  standUp(onDone, internal = false) {
+    if (!internal) this.cmd++;
     if (!this.sitting) { onDone && onDone(); return; }
     const front = this.seat.front;
     this.sitting = false; this.act = 'standup';
-    this.tween = { from: this.pos.clone(), to: new THREE.Vector3(front.x, 0, front.z), t: 0, dur: 0.75, delay: 0.1, done: () => { this.seat = null; this.act = 'stand'; onDone && onDone(); } };
+    this.tween = { from: this.pos.clone(), to: new THREE.Vector3(front.x, 0, front.z), t: 0, dur: 0.75, delay: 0.1, fin: () => { this.seat = null; this.act = 'stand'; }, cb: onDone };
   }
   face(rot) { this.rotTarget = rot; }
   faceTo(x, z) { this.rotTarget = Math.atan2(x - this.pos.x, z - this.pos.z); }
@@ -173,7 +187,7 @@ export class Character {
     if (this.tween) {
       const tw = this.tween;
       if (tw.delay > 0) tw.delay -= dt;
-      else { tw.t = Math.min(1, tw.t + dt / tw.dur); p.lerpVectors(tw.from, tw.to, easeIO(tw.t)); if (tw.t >= 1) { this.tween = null; tw.done && tw.done(); } }
+      else { tw.t = Math.min(1, tw.t + dt / tw.dur); p.lerpVectors(tw.from, tw.to, easeIO(tw.t)); if (tw.t >= 1) { this.tween = null; tw.fin && tw.fin(); tw.cb && tw.cb(); } }
     }
     if (this.curve) {
       const u = Math.min(1, this.s / this.curveLen);

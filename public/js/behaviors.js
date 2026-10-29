@@ -7,7 +7,7 @@ const pick = (arr) => arr[(Math.random() * arr.length) | 0];
 /* ---------- langkah-langkah skrip ---------- */
 // Setiap langkah: { start(agent), tick(agent, dt) -> true bila selesai, stop?(agent) }
 export const S = {
-  walk: (target) => ({ start(a) { this.done = false; a.ch.walkTo(target, () => (this.done = true)); }, tick() { return this.done; }, stop(a) { a.ch.curve = null; } }),
+  walk: (target) => ({ start(a) { this.done = false; a.ch.walkTo(target, () => (this.done = true)); }, tick() { return this.done; }, stop(a) { a.ch.cancel(); } }),
   sit: (seatInfo) => ({ start(a) { this.done = false; a.ch.sitAt(seatInfo, () => (this.done = true)); }, tick() { return this.done; } }),
   stand: () => ({ start(a) { this.done = false; a.ch.standUp(() => (this.done = true)); }, tick() { return this.done; } }),
   face: (rot) => ({ start(a) { a.ch.face(rot); this.t = 0; }, tick(a, dt) { return (this.t += dt) > 0.35; } }),
@@ -45,6 +45,7 @@ export class Agent {
   abort() {
     if (!this.script) return;
     if (this.step && this.step.stop) this.step.stop(this);
+    this.ch.cancel();
     this.finishScript(true);
   }
   finishScript(aborted) {
@@ -66,6 +67,9 @@ export class Agent {
       if (next.status) this.setStatus(next.status);
       this.advance();
     }
+    // pengaman: langkah yang tersangkut lebih dari 90 detik dihentikan supaya karyawan tidak diam selamanya
+    this.stepT = (this.stepT || 0) + dt;
+    if (this.stepT > 90) { console.warn('[Kantor] langkah tersangkut, skrip dihentikan:', this.id, this.script && this.script.name); this.abort(); return; }
     if (this.step && this.step.tick(this, dt)) this.advance();
   }
   advance() {
@@ -73,6 +77,7 @@ export class Agent {
     const steps = this.script.steps;
     if (this.stepIdx >= steps.length) { this.finishScript(false); return; }
     this.step = steps[this.stepIdx];
+    this.stepT = 0;
     this.step.start(this);
   }
 }
